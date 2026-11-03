@@ -95,26 +95,26 @@ pages this small costs little, usually pennies a month, but both providers need 
 > settings are never uploaded.
 
 Retrace uploads with your own `gcloud` or `aws` command-line tool, so it never handles your cloud password
-or keys. Bucket names are shared worldwide, so pick your own in place of `my-retrace-rounds`.
+or keys. Bucket names are shared worldwide, so pick your own in place of `my-golf-replays-example`.
 
 ### Google Cloud Storage
 
 Install the [gcloud CLI](https://cloud.google.com/sdk/docs/install), run `gcloud auth login`, then:
 
 ```powershell
-gcloud storage buckets create gs://my-retrace-rounds --location=us-central1 --uniform-bucket-level-access --public-access-prevention
-.venv\Scripts\python.exe retrace.py set publish_to gs://my-retrace-rounds
+gcloud storage buckets create gs://my-golf-replays-example --location=us-central1 --uniform-bucket-level-access --public-access-prevention
+.venv\Scripts\python.exe retrace.py set publish_to gs://my-golf-replays-example
 .venv\Scripts\python.exe retrace.py publish
 ```
 
 That bucket is private. You can look through it in the Google Cloud console. When you're ready to share it:
 
 ```powershell
-gcloud storage buckets update gs://my-retrace-rounds --no-public-access-prevention
-gcloud storage buckets add-iam-policy-binding gs://my-retrace-rounds --member=allUsers --role=roles/storage.objectViewer
+gcloud storage buckets update gs://my-golf-replays-example --no-public-access-prevention
+gcloud storage buckets add-iam-policy-binding gs://my-golf-replays-example --member=allUsers --role=roles/storage.objectViewer
 ```
 
-Your rounds are then at `https://storage.googleapis.com/my-retrace-rounds/index.html`. To make it private
+Your rounds are then at `https://storage.googleapis.com/my-golf-replays-example/index.html`. To make it private
 again, remove that access with `remove-iam-policy-binding` and the same two options, then run the first
 command with `--public-access-prevention`.
 
@@ -123,8 +123,8 @@ command with `--public-access-prevention`.
 Install the [AWS CLI](https://aws.amazon.com/cli/), run `aws configure`, then:
 
 ```powershell
-aws s3 mb s3://my-retrace-rounds
-.venv\Scripts\python.exe retrace.py set publish_to s3://my-retrace-rounds
+aws s3 mb s3://my-golf-replays-example
+.venv\Scripts\python.exe retrace.py set publish_to s3://my-golf-replays-example
 .venv\Scripts\python.exe retrace.py publish
 ```
 
@@ -137,23 +137,23 @@ New S3 buckets are private. To share it, save this as `policy.json` with your bu
     "Effect": "Allow",
     "Principal": "*",
     "Action": "s3:GetObject",
-    "Resource": "arn:aws:s3:::my-retrace-rounds/*"
+    "Resource": "arn:aws:s3:::my-golf-replays-example/*"
   }]
 }
 ```
 
 ```powershell
-aws s3api delete-public-access-block --bucket my-retrace-rounds
-aws s3api put-bucket-policy --bucket my-retrace-rounds --policy file://policy.json
+aws s3api delete-public-access-block --bucket my-golf-replays-example
+aws s3api put-bucket-policy --bucket my-golf-replays-example --policy file://policy.json
 ```
 
-Your rounds are then at `https://my-retrace-rounds.s3.<region>.amazonaws.com/index.html`, where `<region>` is
+Your rounds are then at `https://my-golf-replays-example.s3.<region>.amazonaws.com/index.html`, where `<region>` is
 your bucket's region.
 
 ### After that
 
 Restart the watcher, and new rounds upload themselves. If an upload fails, for example because the internet
-is down, it tries again every 5 minutes. To put rounds in a folder, use `gs://my-retrace-rounds/golf`. Retrace
+is down, it tries again every 5 minutes. To put rounds in a folder, use `gs://my-golf-replays-example/golf`. Retrace
 only adds and updates files: a page you delete from your PC stays in the bucket until you delete it there too.
 
 ## Commands
