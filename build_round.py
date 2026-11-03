@@ -157,8 +157,13 @@ def lsq_pin(pairs, guess):
         best = err.min(); lm = (err <= np.roll(err, 1)) & (err <= np.roll(err, -1)) & (err < best + 1.0)
         lsq_pin.alts = [cand[i] for i in np.flatnonzero(lm) if np.linalg.norm(cand[i] - x0) > 3]
     else:
-        x0 = guess.copy(); lsq_pin.alts = []
-    inl = np.abs(np.linalg.norm(x0 - E, axis=1) - rr) < max(4.0, 0.03 * rr.min())
+        # one reading gives the distance but not the direction: stay at that distance, facing the guess,
+        # and keep the rest of the circle so a mapped green can choose a better spot later
+        d = guess - c
+        x0 = c + r0 * d / (np.linalg.norm(d) + 1e-9)
+        ang = np.linspace(0, 2 * np.pi, 72, endpoint=False)
+        lsq_pin.alts = list(c + r0 * np.stack([np.cos(ang), np.sin(ang)], 1))
+    inl =np.abs(np.linalg.norm(x0 - E, axis=1) - rr) < max(4.0, 0.03 * rr.min())
     inl[k] = True
     x = x0.copy()
     for _ in range(100):
@@ -204,11 +209,11 @@ for hidx in hole_ids:
     else:
         entry["tee"] = first[0]
     if "pin" not in entry:
-        guess = pairs[-1][0] + 0.5
-        x, res = lsq_pin(pairs, guess)
+        x, res = lsq_pin(pairs, xz(entry["tee"]))
         y = max(it["end"][1] for p in players for it in (p["holes"][hole_ids.index(hidx)] or {"items": []})["items"] if it["kind"] == "shot")
         entry["pin"] = np.array([x[0], y, x[1]]); entry["pinResid"] = res; entry["pinDay"] = None
         entry["pinAlts"] = [np.array([q[0], y, q[1]]) for q in getattr(lsq_pin, "alts", [])]
+        entry["pinOneReading"] = len(pairs) == 1
     if not entry.get("yards"):
         entry["yards"] = float(np.linalg.norm(xz(entry["tee"]) - xz(entry["pin"])) * YD)
     if not entry["pins"]:
@@ -601,13 +606,18 @@ elif OSM:
     to_view = lambda a: np.stack([a[:, 0] + shift[0] - OX, -(a[:, 1] + shift[1] - OZ)], 1)   # GSPro x,z -> viewer X,Z
     OSM_L = {k: ([shapely.transform(g_, to_view) for g_ in v] if isinstance(v, list) else shapely.transform(v, to_view)) for k, v in L0.items()}
     # a pin worked out from only two readings can land on the wrong of two points; if the other is on a green, take it
+    # a pin from one reading could be anywhere at that distance from the ball: take the spot deepest inside the green
     for ch in course_holes:
-        if not gkd and ch.get("pinAlts") and not shapely.contains_xy(OSM_L["green"], *xz(ch["pin"])):
+        one = ch.get("pinOneReading")
+        if not gkd and ch.get("pinAlts") and (one or not shapely.contains_xy(OSM_L["green"], *xz(ch["pin"]))):
             on = [q for q in ch["pinAlts"] if shapely.contains_xy(OSM_L["green"], *xz(q))]
             if on:
+                if one:
+                    edge = shapely.boundary(OSM_L["green"])
+                    on.sort(key=lambda q: -shapely.distance(edge, shapely.points(*xz(q))))
                 ch["pin"] = on[0]; ch["pins"] = [on[0]]
                 ch["yards"] = float(np.linalg.norm(xz(ch["tee"]) - xz(ch["pin"])) * YD)
-                print(f"hole {ch['n']}: pin moved to the other fit, which is on a mapped green")
+                print(f"hole {ch['n']}: pin placed on a mapped green" + (" from a single reading" if one else ", using the other fit"))
     # a pin a few metres off the mapped green: the green was mapped a little small there (or has grown since). GSPro
     # is the truth, so stretch the green out to take in the pin and the balls GSPro says finished on that green
     from shapely.geometry import MultiPoint as _MP
