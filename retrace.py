@@ -1,0 +1,504 @@
+"""Retrace: watch GSPro's round file and turn each finished round into a 3D replay page.
+
+    python retrace.py check                  show what was found and what's missing
+    python retrace.py watch                  keep running; build each round when it finishes
+    python retrace.py build [FILE]           build one round now, finished or not
+    python retrace.py index                  rebuild the rounds list (index.html)
+    python retrace.py publish                upload new and changed pages to the bucket
+    python retrace.py set KEY VALUE          change a setting (see the README)
+    python retrace.py startup on|off         start the watcher when you sign in to Windows
+    python retrace.py stop                   stop a running watcher
+
+GSPro's round file has no "round finished" marker, so a round counts as finished when:
+  - 18 holes are played and every player has holed out on all of them, and the file has been
+    quiet for quiet_seconds; or
+  - at least min_holes holes are played and the file has been quiet for idle_minutes (nine-hole
+    rounds, and rounds stopped early); or
+  - at least min_holes holes are played and GSPro has moved on to a new round.
+Each version of the round file is copied to the saved folder first, so a new round overwriting
+currentRound.dat can't lose the previous one. A round that continues later is simply rebuilt.
+"""
+import argparse, hashlib, json, logging, logging.handlers, os, re, shutil, string, subprocess, sys, time
+from pathlib import Path
+
+import make_index
+
+HERE = Path(__file__).resolve().parent
+CONFIG = HERE / "config.json"
+DEFAULTS = {
+    "round_file": "",       # empty: look in the usual place
+    "courses_dir": "",      # empty: look in the usual place
+    "output_dir": "",       # empty: <home>/Retrace
+    "publish_to": "",       # gs://bucket[/folder] or s3://bucket[/folder]
+    "quiet_seconds": 60,
+    "idle_minutes": 30,
+    "min_holes": 9,
+    "courses": {},          # course key -> file prefix in lidar/ and osm/
+}
+POLL_SECONDS = 5
+PUBLISH_RETRY_SECONDS = 300
+log = logging.getLogger("retrace")
+
+
+# ---------------------------------------------------------------- settings and paths
+def load_config():
+    cfg = json.loads(json.dumps(DEFAULTS))
+    if CONFIG.exists():
+        cfg.update(json.loads(CONFIG.read_text(encoding="utf-8-sig")))
+    return cfg
+
+
+def round_file(cfg):
+    """The configured round file, or GSPro's usual location, or any match under AppData/LocalLow."""
+    if cfg["round_file"]:
+        return Path(cfg["round_file"])
+    low = Path.home() / "AppData" / "LocalLow"
+    usual = low / "GSPro" / "GSPro" / "currentRound.dat"
+    if usual.exists():
+        return usual
+    found = sorted(low.glob("*/*/currentRound.dat")) if low.is_dir() else []
+    return found[0] if found else usual
+
+
+def courses_dir(cfg):
+    if cfg["courses_dir"]:
+        return Path(cfg["courses_dir"])
+    for drive in "CDEFGH":
+        p = Path(f"{drive}:/GSProV1/Core/GSP/Courses")
+        if p.is_dir():
+            return p
+    return Path("C:/GSProV1/Core/GSP/Courses")
+
+
+def output_dir(cfg):
+    return Path(cfg["output_dir"]) if cfg["output_dir"] else Path.home() / "Retrace"
+
+
+def rounds_dir(cfg):
+    return output_dir(cfg) / "rounds"
+
+
+def stem_for(course_key, round_id):
+    name = re.sub(r"_GSP$", "", str(course_key), flags=re.I).lower()
+    return f"{re.sub(r'[^a-z0-9_-]+', '-', name)}-round-{round_id}"
+
+
+def write_atomic(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+
+
+def load_state(cfg):
+    p = output_dir(cfg) / "state.json"
+    state = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    state.setdefault("rounds", {})
+    state.setdefault("published", {})
+    return state
+
+
+def save_state(cfg, state):
+    write_atomic(output_dir(cfg) / "state.json", json.dumps(state, indent=1).encode("utf-8"))
+
+
+# ---------------------------------------------------------------- reading a round
+def parse_rounds_file(raw):
+    """The rows in a round file, or None if it's empty or only partly written."""
+    try:
+        rows = json.loads(raw.decode("utf-8-sig"))
+    except ValueError:
+        return None
+    if not isinstance(rows, list) or not rows or not isinstance(rows[-1], dict) or "RoundID" not in rows[-1]:
+        return None
+    return rows
+
+
+def summarize(rows):
+    holes = {r["Hole"] for r in rows}
+    last = {}
+    for r in rows:
+        last[r["UserGuid"], r["Hole"]] = r["HoleResult"]
+    players = {r["UserGuid"] for r in rows}
+    all_holed = all(last.get((p, h)) == 7 for p in players for h in holes)
+    return {"round_id": rows[-1]["RoundID"], "course": rows[-1]["CourseKey"], "holes": len(holes), "all_holed": all_holed}
+
+
+def is_due(rec, is_current, now, cfg):
+    """Whether this saved round should be built now."""
+    if rec.get("built_sha") == rec["sha"] or rec["holes"] < cfg["min_holes"]:
+        return False
+    if not is_current:
+        return True  # GSPro has moved on, so this round won't change
+    finished = rec["holes"] >= 18 and rec["all_holed"]
+    wait = cfg["quiet_seconds"] if finished else cfg["idle_minutes"] * 60
+    return now - rec["mtime"] >= wait
+
+
+# ---------------------------------------------------------------- building a page
+def viewer_args(cfg, source, course_key, out, date=None):
+    """make_viewer.py's arguments, using the course folder and any terrain files this course has."""
+    args = [sys.executable, str(HERE / "make_viewer.py"), "--round", str(source), "--out", str(out)]
+    if date:
+        args += ["--date", date]
+    course = courses_dir(cfg) / str(course_key)
+    if course.is_dir():
+        args += ["--course", str(course)]
+    prefix = cfg["courses"].get(course_key) or re.sub(r"_GSP$", "", str(course_key), flags=re.I).lower()
+    lidar, osm = HERE / "lidar", HERE / "osm"
+    if (lidar / f"{prefix}_lidar.tif").exists():
+        args += ["--lidar", str(lidar / f"{prefix}_lidar.tif"), "--align", str(lidar / f"{prefix}_align.json")]
+        layers = [osm / f"{prefix}_{kind}.json" for kind in ("golf", "cover")]
+        layers = [p for p in layers if p.exists()]
+        for p in layers:
+            args += ["--osm", str(p)]
+        if layers:
+            args += ["--osm-shift", str(osm / f"{prefix}_shift.json")]
+        if (lidar / f"{prefix}_trees.json").exists():
+            args += ["--trees", str(lidar / f"{prefix}_trees.json")]
+    return args
+
+
+def run_quietly(args, timeout):
+    """Run a command at low priority with no console window, so a build can't disturb the next round."""
+    flags = 0
+    if os.name == "nt":
+        flags = subprocess.BELOW_NORMAL_PRIORITY_CLASS | subprocess.CREATE_NO_WINDOW
+    env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    return subprocess.run(args, stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", timeout=timeout, creationflags=flags, env=env, cwd=str(HERE))
+
+
+def build_page(cfg, source, course_key, round_id, date=None):
+    """Build one page and refresh the index. Returns the page's path, or None if the build failed."""
+    out = rounds_dir(cfg) / f"{stem_for(course_key, round_id)}.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        done = run_quietly(viewer_args(cfg, source, course_key, out, date), timeout=1200)
+    except subprocess.TimeoutExpired:
+        log.error("build timed out: %s", out.name)
+        return None
+    if done.returncode != 0:
+        log.error("build failed: %s\n%s", out.name, "\n".join(done.stderr.strip().splitlines()[-12:]))
+        return None
+    log.info("built %s", out)
+    make_index.write_index(rounds_dir(cfg))
+    return out
+
+
+# ---------------------------------------------------------------- publishing
+def upload_command(target, path):
+    dest = f"{target.rstrip('/')}/{path.name}"
+    if target.startswith("gs://"):
+        tool = shutil.which("gcloud")
+        if not tool:
+            raise RuntimeError("the gcloud command isn't installed or isn't on PATH")
+        return [tool, "storage", "cp", str(path), dest, "--cache-control=no-cache", "--content-type=text/html"]
+    if target.startswith("s3://"):
+        tool = shutil.which("aws")
+        if not tool:
+            raise RuntimeError("the aws command isn't installed or isn't on PATH")
+        return [tool, "s3", "cp", str(path), dest, "--cache-control", "no-cache", "--content-type", "text/html",
+                "--only-show-errors"]
+    raise RuntimeError(f"publish_to must start with gs:// or s3://, not {target!r}")
+
+
+def publish(cfg, state):
+    """Upload new and changed pages, then the index. Returns False if anything failed."""
+    target = cfg["publish_to"]
+    if not target:
+        return True
+    folder = rounds_dir(cfg)
+    if not folder.is_dir():
+        return True
+    # pages first, so the index never links to a page that isn't there yet
+    files = sorted(p for p in folder.glob("*.html") if p.name != make_index.INDEX) + [folder / make_index.INDEX]
+    for path in files:
+        if not path.exists():
+            continue
+        st = path.stat()
+        signature = f"{st.st_size}:{st.st_mtime_ns}"
+        if state["published"].get(path.name) == signature:
+            continue
+        try:
+            done = run_quietly(upload_command(target, path), timeout=900)
+        except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
+            log.error("upload failed: %s: %s", path.name, e)
+            return False
+        if done.returncode != 0:
+            log.error("upload failed: %s\n%s", path.name, done.stderr.strip()[-800:])
+            return False
+        state["published"][path.name] = signature
+        save_state(cfg, state)
+        log.info("uploaded %s", path.name)
+    return True
+
+
+# ---------------------------------------------------------------- the watcher
+class Watcher:
+    def __init__(self, cfg):
+        self.cfg, self.state = cfg, load_state(cfg)
+        self.last_stat, self.failed = None, {}
+        self.next_publish = 0.0  # checked once at start, and again after each build or failed upload
+
+    def snapshot(self):
+        """Copy the round file to the saved folder when its contents change."""
+        path = round_file(self.cfg)
+        try:
+            st = path.stat()
+            if self.last_stat == (st.st_mtime_ns, st.st_size):
+                return
+            raw = path.read_bytes()
+        except OSError:
+            return  # not there yet, or GSPro has it locked: try again next time
+        rows = parse_rounds_file(raw)
+        if rows is None:
+            return  # part-way through being written, or empty
+        self.last_stat = (st.st_mtime_ns, st.st_size)
+        sha = hashlib.sha1(raw).hexdigest()
+        info = summarize(rows)
+        key = str(info["round_id"])
+        self.state["current"] = key
+        rec = self.state["rounds"].get(key)
+        if rec and rec["sha"] == sha:
+            save_state(self.cfg, self.state)
+            return
+        saved = output_dir(self.cfg) / "saved" / f"{stem_for(info['course'], key)}.dat"
+        write_atomic(saved, raw)
+        os.utime(saved, ns=(st.st_mtime_ns, st.st_mtime_ns))  # the page's date comes from this time
+        built = rec.get("built_sha") if rec else None
+        self.state["rounds"][key] = dict(info, sha=sha, mtime=st.st_mtime, saved=str(saved), built_sha=built)
+        save_state(self.cfg, self.state)
+        log.info("round %s: %s, %d holes", key, info["course"], info["holes"])
+
+    def tick(self, now=None):
+        now = time.time() if now is None else now
+        self.snapshot()
+        for key, rec in list(self.state["rounds"].items()):
+            if self.failed.get(key) == rec["sha"] or not is_due(rec, key == self.state.get("current"), now, self.cfg):
+                continue
+            if build_page(self.cfg, rec["saved"], rec["course"], rec["round_id"]):
+                rec["built_sha"] = rec["sha"]
+                save_state(self.cfg, self.state)
+                self.next_publish = 0.0
+            else:
+                self.failed[key] = rec["sha"]  # try again if the round changes or the watcher restarts
+        if self.cfg["publish_to"] and self.next_publish is not None and now >= self.next_publish:
+            self.next_publish = None if publish(self.cfg, self.state) else now + PUBLISH_RETRY_SECONDS
+        # a build sets next_publish back to 0.0, so None just means nothing is waiting
+
+
+def setup_logging(cfg):
+    output_dir(cfg).mkdir(parents=True, exist_ok=True)
+    log.setLevel(logging.INFO)
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%Y-%m-%d %H:%M:%S")
+    handlers = [logging.handlers.RotatingFileHandler(output_dir(cfg) / "retrace.log", maxBytes=1_000_000, backupCount=1, encoding="utf-8")]
+    if sys.stderr:  # there's no console under pythonw
+        handlers.append(logging.StreamHandler())
+    for h in handlers:
+        h.setFormatter(fmt)
+        log.addHandler(h)
+
+
+def take_lock(cfg):
+    """Hold a lock while running. Returns the open file, or None if another watcher has it."""
+    output_dir(cfg).mkdir(parents=True, exist_ok=True)
+    f = open(output_dir(cfg) / "watcher.lock", "a+b")
+    try:
+        import msvcrt
+    except ImportError:
+        return f
+    try:
+        f.seek(0)
+        msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        f.close()
+        return None
+    return f
+
+
+def cmd_watch(cfg, a):
+    setup_logging(cfg)
+    lock = take_lock(cfg)
+    if lock is None:
+        log.info("a watcher is already running")
+        return 0
+    (output_dir(cfg) / "watcher.pid").write_text(str(os.getpid()), encoding="utf-8")
+    log.info("watching %s", round_file(cfg))
+    watcher = Watcher(cfg)
+    while True:
+        try:
+            watcher.tick()
+        except Exception:
+            log.exception("watcher error; carrying on")
+        time.sleep(POLL_SECONDS)
+
+
+# ---------------------------------------------------------------- other commands
+def cmd_build(cfg, a):
+    setup_logging(cfg)
+    source = Path(a.file) if a.file else round_file(cfg)
+    if not source.exists():
+        log.error("round file not found: %s", source)
+        return 1
+    rows = parse_rounds_file(source.read_bytes())
+    if rows is None:
+        log.error("no round in %s (empty, or GSPro is still writing it)", source)
+        return 1
+    info = summarize(rows)
+    if not build_page(cfg, source, info["course"], info["round_id"], a.date):
+        return 1
+    state = load_state(cfg)
+    return 0 if publish(cfg, state) else 1
+
+
+def cmd_index(cfg, a):
+    count = make_index.write_index(rounds_dir(cfg))
+    print(f"{rounds_dir(cfg) / make_index.INDEX}: {count} round(s)")
+    return 0
+
+
+def cmd_publish(cfg, a):
+    setup_logging(cfg)
+    if not cfg["publish_to"]:
+        log.error('no bucket set: python retrace.py set publish_to gs://your-bucket')
+        return 1
+    make_index.write_index(rounds_dir(cfg))
+    return 0 if publish(cfg, load_state(cfg)) else 1
+
+
+def cmd_set(cfg, a):
+    raw = load_config_file()
+    if a.key.startswith("course."):
+        raw.setdefault("courses", {})[a.key[len("course."):]] = a.value
+    elif a.key not in DEFAULTS or a.key == "courses":
+        print("unknown setting:", a.key, "\nsettings:", ", ".join(k for k in DEFAULTS if k != "courses"), "or course.<CourseKey>")
+        return 1
+    elif isinstance(DEFAULTS[a.key], int):
+        raw[a.key] = int(a.value)
+    elif a.value:
+        raw[a.key] = a.value
+    else:
+        raw.pop(a.key, None)
+    write_atomic(CONFIG, json.dumps(raw, indent=2).encode("utf-8"))
+    print(f"set {a.key} = {a.value!r} in {CONFIG}")
+    return 0
+
+
+def load_config_file():
+    return json.loads(CONFIG.read_text(encoding="utf-8-sig")) if CONFIG.exists() else {}
+
+
+def startup_file():
+    return Path(os.environ["APPDATA"]) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup" / "Retrace.cmd"
+
+
+def cmd_startup(cfg, a):
+    path = startup_file()
+    if a.state == "off":
+        path.unlink(missing_ok=True)
+        print("removed", path)
+        return 0
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    if not pythonw.exists():
+        print("pythonw.exe not found next to", sys.executable)
+        return 1
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f'@echo off\nstart "" "{pythonw}" "{HERE / "retrace.py"}" watch\n', encoding="mbcs" if os.name == "nt" else "utf-8")
+    print("the watcher will start when you sign in:", path)
+    return 0
+
+
+def watcher_running(cfg):
+    lock = take_lock(cfg)
+    if lock is None:
+        return True
+    lock.close()
+    return False
+
+
+def cmd_stop(cfg, a):
+    if not watcher_running(cfg):
+        print("the watcher isn't running")
+        return 0
+    pid = (output_dir(cfg) / "watcher.pid").read_text(encoding="utf-8").strip()
+    done = subprocess.run(["taskkill", "/pid", pid, "/f"], capture_output=True, text=True)
+    print(done.stdout.strip() or done.stderr.strip())
+    return done.returncode
+
+
+def cmd_check(cfg, a):
+    problems = 0
+
+    def line(ok, label, detail=""):
+        nonlocal problems
+        problems += ok is False
+        mark = {True: "ok ", False: "!! ", None: "-  "}[ok]
+        print(f"{mark} {label}{': ' + str(detail) if detail else ''}")
+
+    for mod, pip_name in (("numpy", "numpy"), ("scipy", "scipy"), ("PIL", "pillow"), ("rasterio", "rasterio"), ("shapely", "shapely"), ("pyproj", "pyproj"), ("laspy", "laspy")):
+        try:
+            __import__(mod)
+            line(True, f"Python package {pip_name}")
+        except ImportError:
+            line(False, f"Python package {pip_name}", "missing; run: python -m pip install -r requirements.txt")
+    rf = round_file(cfg)
+    if rf.exists():
+        line(True, "Round file", rf)
+    else:
+        line(None, "Round file not there yet", f"{rf} (GSPro creates it during a round; if you've played one, set round_file)")
+    cd = courses_dir(cfg)
+    line(cd.is_dir(), "Courses folder", cd if cd.is_dir() else f"{cd} not found; run: python retrace.py set courses_dir \"D:/your/Courses\"")
+    if rf.exists():
+        rows = parse_rounds_file(rf.read_bytes())
+        if rows is None:
+            line(None, "Latest round", "the file has no finished write right now")
+        else:
+            info = summarize(rows)
+            line(None, "Latest round", f"{info['course']}, round {info['round_id']}, {info['holes']} holes" + (", all holed out" if info["all_holed"] else ""))
+            has_gkd = any((cd / info["course"]).glob("*.[gG][kK][dD]")) if (cd / info["course"]).is_dir() else False
+            line(has_gkd or None, "Course data for that round", "found" if has_gkd else "no .GKD file, so the page will use the shot data only")
+            terrain = any(x == "--lidar" for x in viewer_args(cfg, rf, info["course"], "x"))
+            line(True if terrain else None, "Real terrain for that course", "found" if terrain else "none (optional; see the README)")
+    line(True, "Pages go to", rounds_dir(cfg))
+    target = cfg["publish_to"]
+    if target:
+        try:
+            upload_command(target, Path("x"))
+            line(True, "Publishing to", target)
+        except RuntimeError as e:
+            line(False, "Publishing to " + target, e)
+    else:
+        line(None, "Publishing", "off")
+    line(True if watcher_running(cfg) else None, "Watcher", "running" if watcher_running(cfg) else "not running")
+    if os.environ.get("APPDATA"):
+        line(True if startup_file().exists() else None, "Start at sign-in", "on" if startup_file().exists() else "off")
+    print("\nAll good." if not problems else f"\n{problems} problem(s) to fix.")
+    return 1 if problems else 0
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="command", required=True)
+    sub.add_parser("check").set_defaults(fn=cmd_check)
+    sub.add_parser("watch").set_defaults(fn=cmd_watch)
+    p = sub.add_parser("build")
+    p.add_argument("file", nargs="?", help="a saved round file (default: GSPro's current round)")
+    p.add_argument("--date", help="date the round was played, YYYY-MM-DD (default: when the file was last written)")
+    p.set_defaults(fn=cmd_build)
+    sub.add_parser("index").set_defaults(fn=cmd_index)
+    sub.add_parser("publish").set_defaults(fn=cmd_publish)
+    p = sub.add_parser("set")
+    p.add_argument("key")
+    p.add_argument("value")
+    p.set_defaults(fn=cmd_set)
+    p = sub.add_parser("startup")
+    p.add_argument("state", choices=("on", "off"))
+    p.set_defaults(fn=cmd_startup)
+    sub.add_parser("stop").set_defaults(fn=cmd_stop)
+    a = ap.parse_args()
+    sys.exit(a.fn(load_config(), a))
+
+
+if __name__ == "__main__":
+    main()

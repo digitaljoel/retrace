@@ -1,12 +1,252 @@
-# Retrace (prototype)
+# Retrace
 
-A companion app for the GSPro golf simulator. Turns GSPro's `currentRound.dat` into one
-self-contained HTML page: a 3D replay of the round, hole by hole, with a player switcher,
-scorecard and shot data. Each page is complete: open it straight from disk or serve it from a
-Cloud Storage bucket.
+Relive your GSPro rounds. Retrace runs quietly on your GSPro PC, and when you finish a round it builds a
+3D replay you can open in any browser: every shot's flight and roll, hole by hole, with a scorecard, shot
+data, a player switcher and a highlight reel of the round's best moments. All your rounds are listed on one
+page, and you can put that page in a cloud bucket to see your rounds from anywhere.
 
-## Files
-- `make_viewer.py`: the one command to run (see below)
+Retrace is an independent community project, not made by or affiliated with GSPro. It's an early prototype,
+so please open an issue if something doesn't work on your setup.
+
+## Install
+
+Do this on the PC that runs GSPro. You don't need to know how to program; you'll paste a few commands.
+
+**1. Install Python.** Get Python 3.9 or newer from [python.org](https://www.python.org/downloads/windows/).
+On the installer's first screen, tick **Add python.exe to PATH**.
+
+**2. Get Retrace.** On this project's [GitHub page](https://github.com/digitaljoel/retrace), click
+**Code > Download ZIP** and unzip it somewhere permanent, such as `C:\Retrace`. Make sure `retrace.py` is
+directly inside that folder, not in another folder within it. If you use git, cloning works too.
+
+**3. Install what it needs.** Open PowerShell and run:
+
+```powershell
+cd C:\Retrace
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+**4. Check that it can find GSPro.**
+
+```powershell
+.venv\Scripts\python.exe retrace.py check
+```
+
+`ok` means found, `!!` means something needs fixing, and `-` is just information. If you've never finished
+a shot in GSPro on this PC, the round file won't exist yet, which is fine. See
+[Where Retrace looks for GSPro](#where-retrace-looks-for-gspro) if something isn't found.
+
+**5. Start it, now and whenever you sign in to Windows.**
+
+```powershell
+.venv\Scripts\python.exe retrace.py startup on
+.venv\Scripts\pythonw.exe retrace.py watch
+```
+
+There's no window: it runs in the background. **Play a round**, and shortly after you hole out on the 18th,
+open `C:\Users\<you>\Retrace\rounds\index.html`.
+
+## Where Retrace looks for GSPro
+
+| What | Where it looks | To change it |
+|---|---|---|
+| The round file | `C:\Users\<you>\AppData\LocalLow\GSPro\GSPro\currentRound.dat`, then any `currentRound.dat` elsewhere in `LocalLow` | `retrace.py set round_file "D:/path/to/currentRound.dat"` |
+| GSPro's courses | `C:\GSProV1\Core\GSP\Courses`, then the same path on drives D to H | `retrace.py set courses_dir "D:/path/to/Courses"` |
+| Where pages go | `C:\Users\<you>\Retrace\rounds` | `retrace.py set output_dir "D:/path/to/Retrace"` |
+
+`AppData` is a hidden folder. To find it, paste `%USERPROFILE%\AppData\LocalLow` into File Explorer's address
+bar. If you moved your courses, the location is in GSPro under **Settings > Game > Course Folder**.
+
+After changing a setting, restart the watcher: run `retrace.py stop`, then the `pythonw.exe` command above.
+
+## How it knows a round is over
+
+GSPro's round file doesn't say when a round has ended, so Retrace works it out. It builds the page when:
+
+- all 18 holes are played, every player has holed out, and the file hasn't changed for **1 minute**;
+- at least **9 holes** are played and the file hasn't changed for **30 minutes** (nine-hole rounds, and rounds
+  you stopped early); or
+- at least 9 holes are played and GSPro starts a new round.
+
+GSPro starts the round file over with each new round, so Retrace saves a copy after every change, in
+`C:\Users\<you>\Retrace\saved`. Going straight into another round can't lose the last one. If you pause for
+more than 30 minutes mid-round, you'll get a page marked "thru 12", say, and it's rebuilt when you finish.
+
+Rounds under 9 holes are saved but not built. To build one anyway, or to change the timings:
+
+```powershell
+.venv\Scripts\python.exe retrace.py build "C:\Users\<you>\Retrace\saved\some-round.dat"
+.venv\Scripts\python.exe retrace.py set min_holes 6
+.venv\Scripts\python.exe retrace.py set idle_minutes 60
+.venv\Scripts\python.exe retrace.py set quiet_seconds 120
+```
+
+Builds run at low priority, so they shouldn't get in the way if you start another round right away.
+
+## See your rounds from anywhere
+
+Retrace can copy each new page and the rounds list to a Google Cloud Storage or Amazon S3 bucket. Hosting
+pages this small costs little, usually pennies a month, but both providers need a billing account.
+
+> **A public bucket is public.** Anyone with the link can see the pages, which include the names and scores
+> of everyone in the round. Ask your playing partners first. The pages also include tee-shot pictures from
+> the course's files where they exist, so check you're happy to share those. Your saved round files, logs and
+> settings are never uploaded.
+
+Retrace uploads with your own `gcloud` or `aws` command-line tool, so it never handles your cloud password
+or keys. Bucket names are shared worldwide, so pick your own in place of `my-retrace-rounds`.
+
+### Google Cloud Storage
+
+Install the [gcloud CLI](https://cloud.google.com/sdk/docs/install), run `gcloud auth login`, then:
+
+```powershell
+gcloud storage buckets create gs://my-retrace-rounds --location=us-central1 --uniform-bucket-level-access --public-access-prevention
+.venv\Scripts\python.exe retrace.py set publish_to gs://my-retrace-rounds
+.venv\Scripts\python.exe retrace.py publish
+```
+
+That bucket is private. You can look through it in the Google Cloud console. When you're ready to share it:
+
+```powershell
+gcloud storage buckets update gs://my-retrace-rounds --no-public-access-prevention
+gcloud storage buckets add-iam-policy-binding gs://my-retrace-rounds --member=allUsers --role=roles/storage.objectViewer
+```
+
+Your rounds are then at `https://storage.googleapis.com/my-retrace-rounds/index.html`. To make it private
+again, remove that access with `remove-iam-policy-binding` and the same two options, then run the first
+command with `--public-access-prevention`.
+
+### Amazon S3
+
+Install the [AWS CLI](https://aws.amazon.com/cli/), run `aws configure`, then:
+
+```powershell
+aws s3 mb s3://my-retrace-rounds
+.venv\Scripts\python.exe retrace.py set publish_to s3://my-retrace-rounds
+.venv\Scripts\python.exe retrace.py publish
+```
+
+New S3 buckets are private. To share it, save this as `policy.json` with your bucket name in it:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": "*",
+    "Action": "s3:GetObject",
+    "Resource": "arn:aws:s3:::my-retrace-rounds/*"
+  }]
+}
+```
+
+```powershell
+aws s3api delete-public-access-block --bucket my-retrace-rounds
+aws s3api put-bucket-policy --bucket my-retrace-rounds --policy file://policy.json
+```
+
+Your rounds are then at `https://my-retrace-rounds.s3.<region>.amazonaws.com/index.html`, where `<region>` is
+your bucket's region.
+
+### After that
+
+Restart the watcher, and new rounds upload themselves. If an upload fails, for example because the internet
+is down, it tries again every 5 minutes. To put rounds in a folder, use `gs://my-retrace-rounds/golf`. Retrace
+only adds and updates files: a page you delete from your PC stays in the bucket until you delete it there too.
+
+## Commands
+
+Run these from the Retrace folder, starting each with `.venv\Scripts\python.exe`.
+
+| Command | What it does |
+|---|---|
+| `retrace.py check` | Shows what was found and what's missing |
+| `retrace.py watch` | Runs the watcher in this window, showing what it's doing (Ctrl+C to stop) |
+| `retrace.py stop` | Stops the background watcher |
+| `retrace.py startup on` / `off` | Starts the watcher when you sign in, or doesn't |
+| `retrace.py build [FILE] [--date YYYY-MM-DD]` | Builds one round now, finished or not (default: the current round) |
+| `retrace.py index` | Rebuilds the rounds list from the pages in the folder |
+| `retrace.py publish` | Uploads anything new or changed |
+| `retrace.py set SETTING VALUE` | Changes a setting; settings are kept in `config.json` |
+
+## Troubleshooting
+
+**Nothing appears after a round.** Run `retrace.py check` and confirm the watcher is running and the round
+file is found. Then read `C:\Users\<you>\Retrace\retrace.log`, which records every round seen, page built,
+upload and error.
+
+**The round file isn't found, but you've played.** Search `LocalLow` for `currentRound.dat` and give Retrace
+the path with `set round_file`.
+
+**The page has few course details.** "No .GKD file" in `check` means Retrace couldn't find that course's folder,
+so the page is built from shot data alone. Check `courses_dir`, then rebuild the round from `saved`.
+
+**A build failed.** The reason is in `retrace.log`. A failed round is tried again if it changes or the watcher
+restarts. Please include the error if you open an issue, but look it over first and leave out anything private.
+
+**Uninstall.** Run `retrace.py stop` and `retrace.py startup off`, then delete the Retrace folder and
+`C:\Users\<you>\Retrace`. Delete any bucket you made from your cloud account.
+
+## Real terrain, greens and trees (optional)
+
+Out of the box, the ground is fitted to your ball positions and the trees are placeholders. For real-world
+courses you can do far better using public lidar surveys and OpenStreetMap. It takes some manual work for each
+course, but it only needs doing once. Retrace uses these files automatically when it finds them:
+
+| File | Contents |
+|---|---|
+| `lidar/<name>_lidar.tif` | Elevation model |
+| `lidar/<name>_align.json` | How the survey lines up with GSPro (created for you) |
+| `lidar/<name>_trees.json` | Real trees (optional) |
+| `osm/<name>_golf.json`, `osm/<name>_cover.json` | Fairways, greens, bunkers and more (optional) |
+| `osm/<name>_shift.json` | How the map lines up with the course (created for you) |
+
+`<name>` is the course key that `retrace.py check` shows, in lower case and without `_GSP`, so `HobbleCreek_GSP`
+becomes `hobblecreek`. To use a different name: `retrace.py set course.YorkGC_GSP york`.
+
+These commands use the same Python packages you installed, so run them with `.venv\Scripts\python.exe`.
+
+### A course in the United States
+
+USGS publishes surveys as streamable point clouds. Find the survey covering your course in
+[usgs-lidar's `boundaries/resources.geojson`](https://github.com/hobuinc/usgs-lidar), and the course's latitude
+and longitude from OpenStreetMap. Then, for example:
+
+    python lidar_trees.py --make-dem lidar/hobblecreek_lidar.tif --lat 40.16083 --lon -111.51211 \
+        --ept https://usgs-lidar-public.s3.us-west-2.amazonaws.com/USGS_LPC_UT_Central_QL1_B2_2018_LAS_2019
+    python fetch_osm.py --lat 40.16083 --lon -111.51211 --out osm/hobblecreek
+
+    # build once, which solves and saves the alignment
+    python retrace.py build path/to/round.dat
+
+    # now find the trees, then build again with them
+    python lidar_trees.py --dem lidar/hobblecreek_lidar.tif --align lidar/hobblecreek_align.json \
+        --ept https://usgs-lidar-public.s3.us-west-2.amazonaws.com/USGS_LPC_UT_Central_QL1_B2_2018_LAS_2019 \
+        --osm osm/hobblecreek_cover.json --osm-shift osm/hobblecreek_shift.json --out lidar/hobblecreek_trees.json
+    python retrace.py build path/to/round.dat
+
+If you have the course folder, `fetch_osm.py --course path/to/Courses/<Course_GSP>` reads the location for you.
+
+### A separate elevation download
+
+Some surveys publish their elevation model separately. Manele's is from NOAA Digital Coast (dataset 10335,
+0.5 m, public domain), cropped to the course and saved as `lidar/manele_lidar.tif`. Its trees then come from the
+survey's point cloud:
+
+    python lidar_trees.py --dem lidar/manele_lidar.tif --align lidar/manele_align.json \
+        --ept https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/entwine/geoid12b/10331 \
+        --osm osm/manele_cover.json --osm-shift osm/manele_shift.json --out lidar/manele_trees.json
+
+Map data (c) OpenStreetMap contributors (ODbL); the page credits it.
+
+## How it works
+
+### Files
+- `retrace.py`: the watcher and the commands above
+- `make_viewer.py`: builds one page; `retrace.py` calls it, and you can run it yourself
+- `make_index.py`: builds the rounds list from the pages in a folder
 - `build_round.py`: parses the round and course data, builds the ground (lidar or placeholder)
 - `align_lidar.py`: lines lidar elevation up with GSPro's coordinates (run for you by the build)
 - `fetch_osm.py`: downloads a course's OpenStreetMap features (fairways, greens, bunkers, paths...)
@@ -14,32 +254,16 @@ Cloud Storage bucket.
 - `lidar_trees.py`: finds the real trees in the lidar point cloud
 - `viewer.template.html`: the page; the round data is inlined into it
 
-Round files, generated pages and the `lidar/` and `osm/` course data aren't in this repository.
-The commands below create the course data; those folders are where the examples put it. The
-examples use three real courses: Manele, Hobble Creek (USGS UT Central QL1 2018 survey) and York
-Golf Club, Columbus, Ohio (USGS Columbus 2019 survey).
+Each page is complete: open it straight from disk or serve it from a bucket. The date on the page is the day
+GSPro last wrote the round file (the final shot), in the local time of the PC building it.
 
-## Run
-    pip install numpy scipy pillow rasterio shapely pyproj "laspy[lazrs]"
-    python make_viewer.py --round path/to/currentRound.dat --course path/to/GSPro/Courses/<Course_GSP>
+To build a page by hand with `make_viewer.py`:
 
-    # Manele with real ground and OpenStreetMap surfaces
-    python make_viewer.py --round path/to/currentRound.dat --course path/to/GSPro/Courses/Manele_Golf_Course_GSP \
-        --lidar lidar/manele_lidar.tif --align lidar/manele_align.json \
-        --osm osm/manele_golf.json --osm osm/manele_cover.json --trees lidar/manele_trees.json
+    python make_viewer.py --round path/to/currentRound.dat --course path/to/GSPro/Courses/<Course_GSP> \
+        [--lidar lidar/x_lidar.tif --align lidar/x_align.json] \
+        [--osm osm/x_golf.json --osm osm/x_cover.json] [--trees lidar/x_trees.json]
 
-    # a new real-world course: fetch its OpenStreetMap data first
-    python fetch_osm.py --course path/to/GSPro/Courses/<Course_GSP> --out osm/<name>
-
-    # ...and its trees (Manele's survey; other places have their own point-cloud index)
-    python lidar_trees.py --dem lidar/manele_lidar.tif --align lidar/manele_align.json \
-        --ept https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/entwine/geoid12b/10331 \
-        --osm osm/manele_cover.json --osm-shift osm/manele_shift.json --out lidar/manele_trees.json
-
-The date on the page is the day GSPro last wrote `currentRound.dat` (the final shot), in the
-local time of the machine running the script. Pass `--date YYYY-MM-DD` to set it yourself.
-
-## Highlights
+### Highlights
 The Highlights button at the top (or H) plays the round's best moments in order, picked from the round
 when the page loads: aces, eagles, hole-outs and bomb drives first, then stuck-it approaches and birdies
 (the approach, then the putt rolling in) and the round's longest drive (the longest that finished in
@@ -52,46 +276,27 @@ bomb drives, a slow-motion landing view, and a slow-motion view from the green. 
 The sun/moon button on the hole card switches between light and dark; the choice is remembered in
 that browser. Otherwise the page follows the system setting.
 
-## Celebrations in the replay
+### Celebrations in the replay
 - A tee shot that carries 240+ yd explodes off the tee and flies as a fireball.
 - An approach from 50+ yd that finishes inside 10 ft (the target grows to exactly 10 ft), or any shot holed from off the green.
 - Birdie, eagle, albatross and hole in one each fly something out of the cup.
   Press 1-4 on a hole to preview them.
 
-## A course with no course folder (Hobble Creek)
-Everything also works from the round file alone. Find the course's location (OpenStreetMap knows most
-real courses), then:
+### A course with no course folder
+Everything also works from the round file alone. The course name comes from OpenStreetMap, the pins are worked
+out from each shot's distance to the pin, the alignment uses the ball positions alone, and there are no tee-shot
+images. USGS stores its surveys in web-map coordinates; the scripts reproject them to UTM metres.
 
-    # elevation model from the survey's own ground points (USGS surveys: find the one covering the
-    # course in https://github.com/hobuinc/usgs-lidar boundaries/resources.geojson)
-    python lidar_trees.py --make-dem lidar/hobblecreek_lidar.tif --lat 40.16083 --lon -111.51211 \
-        --ept https://usgs-lidar-public.s3.us-west-2.amazonaws.com/USGS_LPC_UT_Central_QL1_B2_2018_LAS_2019
-    python fetch_osm.py --lat 40.16083 --lon -111.51211 --out osm/hobblecreek
-    python make_viewer.py --round currentRoundHC.dat --lidar lidar/hobblecreek_lidar.tif \
-        --align lidar/hobblecreek_align.json --osm osm/hobblecreek_golf.json --osm osm/hobblecreek_cover.json
-    python lidar_trees.py --dem lidar/hobblecreek_lidar.tif --align lidar/hobblecreek_align.json \
-        --ept https://usgs-lidar-public.s3.us-west-2.amazonaws.com/USGS_LPC_UT_Central_QL1_B2_2018_LAS_2019 \
-        --osm osm/hobblecreek_cover.json --osm-shift osm/hobblecreek_shift.json --out lidar/hobblecreek_trees.json
-    # and once more with the trees
-    python make_viewer.py ... --trees lidar/hobblecreek_trees.json
-
-Without a course file the course name comes from OpenStreetMap, the pins are worked out from each shot's distance to the pin, the alignment uses
-the ball positions alone, and there are no tee-shot images. USGS stores its surveys in web-map
-coordinates; the scripts reproject them to UTM metres (needs pyproj).
-
-## Real ground from lidar
+### Real ground from lidar
 Free real-world courses are built from public lidar surveys, so the survey lines up with GSPro's
 course exactly once its position is found. `align_lidar.py` does that from points where GSPro's
 ground height is known (ball rests, roll paths, tees, pins, hazard and boundary outlines): a brute
 search over every placement and axis orientation, then a least-squares fit. For Manele, GSPro's x
 runs east and z north, there is no rotation or scaling, and GSPro height = lidar elevation + 0.78 m.
-Ball rests land within 2 cm of the lidar ground (median), pins within 3 cm.
+Ball rests land within 2 cm of the lidar ground (median), pins within 3 cm. Fictional courses have no
+lidar and keep the fitted ground.
 
-Manele's lidar is NOAA/USGS 2022-23 (NOAA Digital Coast dataset 10335, 0.5 m, public domain),
-cropped to the course and rounded to 1 cm. With no `--align` file the build solves the alignment
-and saves it next to the lidar file. Fictional courses have no lidar and keep the fitted ground.
-
-## Fairways, greens and bunkers from OpenStreetMap
+### Fairways, greens and bunkers from OpenStreetMap
 Golf mappers trace fairways, greens, tees, bunkers, rough, water and cart paths in OpenStreetMap.
 `osm_surfaces.py` moves those shapes into GSPro's coordinates through the lidar alignment, then finds
 the small shift that puts every pin inside a green and every ball lie on the matching surface (the
@@ -100,9 +305,9 @@ At Manele, with that shift, all 72 pin positions sit inside OSM greens, every gr
 lands in an OSM green or bunker, and 85% of fairway lies land in an OSM fairway (the rest within a
 few metres of the edge). The shapes are drawn into a 1 m-per-pixel surface texture over the
 low-poly ground; fairways get mowing stripes along their length. Holes OSM doesn't cover keep the
-approximated shapes. Map data (c) OpenStreetMap contributors (ODbL); the page credits it.
+approximated shapes.
 
-## Real trees from the lidar point cloud
+### Real trees from the lidar point cloud
 The same survey publishes its raw points as a streamable index, so `lidar_trees.py` reads just the
 course area (about 18 million points, roughly 30 seconds). The survey only labels ground, so canopy
 height is everything else above the highest ground within a couple of metres (that keeps cliff faces
@@ -113,24 +318,24 @@ measured width, which is a guess at shape, not a species map. Manele comes out a
 mostly low kiawe. The point cloud's heights are on a different reference from the elevation model
 (23.5 m apart at Manele); the script measures that gap from ground points and removes it.
 
-## What is real and what is placeholder
+### What is real and what is placeholder
 - Real, from `currentRound.dat`: every shot's flight and roll path, lies, scores, putts,
   penalties, mulligans and launch data, for every player in the round.
 - Real, from the course `.GKD` (plain JSON): tee boxes, the pin set played (matched
   automatically), aim points, penalty-area outlines and the out-of-bounds line, card
   yardages, stroke index and rating.
-- Real with `--lidar`: the ground, coastline and sea. Without it the terrain is fitted to every
+- Real with lidar: the ground, coastline and sea. Without it the terrain is fitted to every
   recorded ball height, since the `.gspcrse` course package is encrypted.
-- Real with `--osm`: fairway, green, tee, bunker, water, path and building shapes.
-- Real with `--trees`: tree positions, heights and crown sizes (shapes are approximate).
-- Placeholder: trees without `--trees`; surface shapes away from recorded lies without `--osm`.
+- Real with OpenStreetMap: fairway, green, tee, bunker, water, path and building shapes.
+- Real with lidar trees: tree positions, heights and crown sizes (shapes are approximate).
+- Placeholder: trees without lidar trees; surface shapes away from recorded lies without OpenStreetMap.
 - Club names above the driver are inferred from GSPro's club numbers.
 
-## Notes on GSPro's round file
-- `ShotResult` 3 (seen at Hobble Creek): out of bounds / lost ball. The row ends back where the shot
-  was played from (stroke and distance); the page shows it as "OB · re-hit".
+### Notes on GSPro's round file
 - One JSON row per stroke. Coordinates are Unity world metres, the same frame as the `.GKD`.
-- `ShotResult`: 0 normal, 1 mulligan (replayed, not counted), 2 penalty (row ends at the drop).
+- `ShotResult`: 0 normal, 1 mulligan (replayed, not counted), 2 penalty (row ends at the drop),
+  3 out of bounds / lost ball (the row ends back where the shot was played from, stroke and distance;
+  the page shows it as "OB · re-hit").
 - `HoleResult`: 7 holed, 3 in play, 2 tee shot finished on a par-3 green.
 - Rows that repeat the last shot's `GlobalShotNumber` are auto-putts (no putt path).
 - Club 26 with no flight points is a real putt (roll path only).

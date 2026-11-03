@@ -1,0 +1,7 @@
+numpy
+scipy
+pillow
+rasterio
+shapely
+pyproj
+laspy[lazrs]

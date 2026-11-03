@@ -3,6 +3,9 @@
 *.html
 !viewer.template.html
 
+# Your settings
+config.json
+
 # Course data, created by the commands in the README
 lidar/
 osm/
