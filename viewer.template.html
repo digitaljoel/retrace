@@ -1,0 +1,2055 @@
+<meta charset="utf-8">
+<title>Retrace</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Big+Shoulders+Display:wght@700;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: a full-bleed low-poly course diorama. A tee-sign hole card floats top-left, the shot card docks right
+   (a bottom sheet on phones), and a two-player scorecard runs along the bottom-left. */
+:root {
+  --sky-top: #8DBCD8;
+  --sky-bottom: #E4ECE3;
+  --fog: #D6E2DC;
+  --panel: rgba(249, 251, 247, 0.93);
+  --ink: #14211A;
+  --ink-2: #54655C;
+  --line: rgba(20, 33, 26, 0.13);
+  --chip: rgba(20, 33, 26, 0.06);
+  --accent: #C93A22;
+  --under: #C32F25;
+  --focus: #1D63D6;
+  --shadow: 0 10px 30px rgba(18, 38, 30, 0.16), 0 1px 2px rgba(18, 38, 30, 0.12);
+  --f-display: "Big Shoulders Display", "Arial Narrow", Impact, sans-serif;
+  --f-body: Archivo, "Helvetica Neue", Arial, sans-serif;
+  --f-data: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --sky-top: #07111A; --sky-bottom: #263A41; --fog: #22343A;
+    --panel: rgba(15, 23, 26, 0.91); --ink: #E3ECE6; --ink-2: #97AAA1; --line: rgba(227, 236, 230, 0.14);
+    --chip: rgba(227, 236, 230, 0.08); --accent: #FF7357; --under: #FF7B6B; --focus: #84B4FF;
+    --shadow: 0 10px 30px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.4);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --sky-top: #07111A; --sky-bottom: #263A41; --fog: #22343A;
+  --panel: rgba(15, 23, 26, 0.91); --ink: #E3ECE6; --ink-2: #97AAA1; --line: rgba(227, 236, 230, 0.14);
+  --chip: rgba(227, 236, 230, 0.08); --accent: #FF7357; --under: #FF7B6B; --focus: #84B4FF;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.4);
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: linear-gradient(180deg, var(--sky-top) 0%, var(--sky-bottom) 72%);
+  color: var(--ink);
+  font-family: var(--f-body);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+#stage { position: fixed; inset: 0; }
+#stage canvas { display: block; touch-action: none; }
+#stage canvas, #stage .labels { transition: opacity 0.22s ease; }
+#stage.dip canvas, #stage.dip .labels { opacity: 0; }
+.reel-btn { position: fixed; z-index: 99995; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 7px; font: 700 13px/1 var(--f-body); letter-spacing: 0.01em; padding: 10px 16px 10px 13px; border: 0; border-radius: 999px; background: var(--ink); color: var(--sky-bottom); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28); cursor: pointer; white-space: nowrap; }
+.reel-btn svg { width: 14px; height: 14px; color: #FFC21F; }
+.reel-btn.on { background: #D8432C; color: #FFFFFF; }
+.reel-btn.on svg { color: #FFFFFF; }
+.reel-btn:focus-visible { outline: 2px solid #FFC21F; outline-offset: 2px; }
+.reel-card { position: fixed; z-index: 99995; transform: translateX(-50%); width: max-content; min-width: 270px; max-width: min(92vw, 540px); pointer-events: none; background: var(--panel); backdrop-filter: blur(10px) saturate(1.2); -webkit-backdrop-filter: blur(10px) saturate(1.2); border-radius: 12px; border-left: 5px solid var(--c, var(--ink)); padding: 10px 16px 11px 15px; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28); }
+.reel-card.in { animation: reel-in 0.5s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes reel-in { from { opacity: 0; transform: translate(-50%, -10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+.rc-top { font: 600 10.5px/1.2 var(--f-data); letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-2); display: flex; align-items: center; gap: 6px; }
+.rc-top .who { font: 700 12px/1 var(--f-body); letter-spacing: 0.02em; text-transform: none; color: #FFFFFF; background: var(--c); padding: 4px 9px 4px; border-radius: 999px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2); }
+.rc-top { gap: 8px; }
+.rc-title { font: 800 28px/1.02 var(--f-display); letter-spacing: 0.02em; text-transform: uppercase; color: var(--ink); margin: 4px 0 6px; }
+.rc-take { display: flex; align-items: center; justify-content: space-between; gap: 14px; font: 500 12px/1.2 var(--f-body); color: var(--ink-2); }
+.rc-take .chip { font: 700 9.5px/1 var(--f-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--sky-bottom); background: var(--ink); padding: 4px 7px; border-radius: 4px; white-space: nowrap; }
+@media (max-width: 760px) {
+  .rc-title { font-size: 18px; margin: 3px 0 4px; } .rc-top { font-size: 9.5px; } .rc-take { font-size: 11px; }
+  .reel-card { padding: 7px 12px 8px 11px; min-width: 0; width: calc(100vw - 24px); }
+  .reel-btn { padding: 8px 14px 8px 11px; font-size: 12px; }
+  body.reel-on .shots { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .reel-card.in { animation: none; } #stage canvas, #stage .labels { transition: none; } }
+.labels { position: absolute; inset: 0; pointer-events: none; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.card {
+  position: fixed;
+  background: var(--panel);
+  backdrop-filter: blur(10px) saturate(1.2);
+  -webkit-backdrop-filter: blur(10px) saturate(1.2);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+
+/* hole card: a tee sign */
+.hole-card {
+  top: calc(16px + env(safe-area-inset-top, 0px));
+  left: calc(16px + env(safe-area-inset-left, 0px));
+  width: 318px;
+  padding: 14px 16px 14px;
+  display: grid;
+  gap: 10px;
+}
+.theme-btn { position: absolute; top: 9px; right: 9px; width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: var(--chip); color: var(--ink-2); cursor: pointer; }
+.theme-btn:hover { color: var(--ink); border-color: color-mix(in srgb, var(--ink) 35%, transparent); }
+.theme-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.theme-btn svg { width: 15px; height: 15px; }
+.theme-btn .i-sun, .theme-btn.dark .i-moon { display: none; }
+.theme-btn.dark .i-sun { display: block; }
+.hole-card .meta { padding-right: 34px; }
+.meta { font: 500 11px/1.35 var(--f-data); color: var(--ink-2); letter-spacing: 0.02em; display: flex; flex-wrap: wrap; gap: 2px 10px; }
+.meta b { font-weight: 600; color: var(--ink); }
+.meta .played { color: var(--ink); }
+.sign { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: end; }
+.lbl { display: block; font: 600 10px/1 var(--f-body); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); }
+.big { display: block; font: 900 72px/0.82 var(--f-display); letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.big.word { font-size: 44px; line-height: 0.9; }
+.facts { display: grid; grid-template-columns: repeat(3, auto); gap: 14px; justify-content: start; padding-bottom: 3px; }
+.mid { display: block; font: 800 30px/1 var(--f-display); margin-top: 5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mid .pd { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--c); margin: 0 3px 4px 0; vertical-align: middle; }
+.mid .sep { color: var(--ink-2); font-weight: 700; margin: 0 4px; }
+.mid .scores { display: inline-flex; align-items: center; gap: 12px; vertical-align: top; }
+.mid .ps { display: inline-flex; align-items: center; gap: 2px; }
+.mid .ps .pd { margin: 0 3px 0 0; }
+.mid .hs { font-size: 26px; width: 34px; height: 34px; margin: -2px 0; }
+.mid .hs.birdie, .mid .hs.bogey { border-width: 2px; }
+.mid .hs.eagle { border-width: 2px; box-shadow: 0 0 0 2.5px var(--panel), 0 0 0 4.5px currentColor; }
+.mid .hs.double { border-width: 2px; box-shadow: 0 0 0 2.5px var(--panel), 0 0 0 4.5px currentColor; }
+.note-item { display: inline-flex; align-items: center; gap: 0; color: var(--ink-2); }
+.note-item .pd { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--c); margin-right: 6px; }
+.result { font: 500 13px/1.35 var(--f-body); color: var(--ink); display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; }
+.pill { font: 600 11px/1 var(--f-body); letter-spacing: 0.06em; text-transform: uppercase; padding: 5px 8px; border-radius: 999px; background: var(--chip); color: var(--ink); }
+.pill.under { background: color-mix(in srgb, var(--under) 16%, transparent); color: var(--under); }
+.pill .pd { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--c); margin-right: 5px; }
+.nav { display: flex; gap: 6px; flex-wrap: wrap; }
+.btn {
+  appearance: none; border: 1px solid var(--line); background: var(--chip);
+  border-radius: 9px; padding: 8px 11px; font: 600 12.5px/1 var(--f-body); cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.btn:hover { border-color: color-mix(in srgb, var(--ink) 35%, transparent); }
+.btn[aria-pressed="true"] { background: var(--ink); color: var(--sky-bottom); border-color: var(--ink); }
+.btn.icon { padding: 7px 9px; }
+.btn svg { width: 15px; height: 15px; }
+.btn:disabled { opacity: 0.4; cursor: default; }
+.seg { display: flex; padding: 3px; gap: 3px; border-radius: 10px; background: var(--chip); border: 1px solid var(--line); }
+.seg button { appearance: none; border: 0; background: transparent; border-radius: 7px; padding: 7px 10px; font: 600 12.5px/1 var(--f-body); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; flex: 1; justify-content: center; min-width: 0; }
+.seg button span.nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seg button .pd { width: 8px; height: 8px; border-radius: 50%; background: var(--c); flex: none; }
+.seg button[aria-pressed="true"] { background: var(--panel); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18), inset 0 0 0 1px var(--line); }
+.kbd { font: 500 10.5px/1.3 var(--f-data); color: var(--ink-2); }
+
+/* shot card */
+.shots {
+  top: calc(16px + env(safe-area-inset-top, 0px));
+  right: calc(16px + env(safe-area-inset-right, 0px));
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  width: 352px;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.shots header { padding: 14px 16px 10px; border-bottom: 1px solid var(--line); display: grid; gap: 3px; }
+.shots h2 { margin: 0; font: 800 22px/1 var(--f-display); letter-spacing: 0.01em; text-transform: uppercase; }
+.shots .sub { font: 500 12px/1.35 var(--f-body); color: var(--ink-2); }
+.shot-img { appearance: none; display: block; width: 100%; margin: 0; padding: 0; border: 0; border-bottom: 1px solid var(--line); position: relative; background: var(--chip); cursor: zoom-in; text-align: left; }
+.shot-img img { display: block; width: 100%; height: auto; aspect-ratio: 1920 / 1026; object-fit: cover; }
+.shot-img .cap { position: absolute; left: 10px; bottom: 8px; font: 600 10px/1 var(--f-body); letter-spacing: 0.1em; text-transform: uppercase; color: #fff; background: rgba(10, 18, 14, 0.62); padding: 4px 6px; border-radius: 4px; }
+.shot-img .zoom { position: absolute; right: 8px; top: 8px; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; background: rgba(10, 18, 14, 0.62); color: #fff; opacity: 0.8; transition: opacity 0.15s ease; }
+.shot-img:hover .zoom, .shot-img:focus-visible .zoom { opacity: 1; }
+.shot-img .zoom svg { width: 14px; height: 14px; }
+.lightbox { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: max(20px, env(safe-area-inset-top, 0px)) max(20px, env(safe-area-inset-right, 0px)) max(20px, env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-left, 0px)); background: rgba(6, 12, 9, 0); transition: background 0.3s ease; cursor: zoom-out; }
+.lightbox.open { background: rgba(6, 12, 9, 0.74); }
+.lightbox figure { margin: 0; display: grid; gap: 12px; justify-items: center; }
+.lightbox img { display: block; width: auto; height: auto; max-width: min(92vw, 1120px); max-height: calc(100vh - 120px); border-radius: 10px; box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55); }
+.lightbox figcaption { font: 600 12px/1.3 var(--f-body); letter-spacing: 0.08em; text-transform: uppercase; color: #fff; opacity: 0; transition: opacity 0.25s ease 0.12s; }
+.lightbox.open figcaption { opacity: 0.9; }
+@media (prefers-reduced-motion: reduce) { .lightbox, .lightbox figcaption { transition: none; } }
+.list { list-style: none; margin: 0; padding: 6px; overflow-y: auto; flex: 1; min-height: 0; display: grid; align-content: start; gap: 2px; }
+.list .grp { padding: 10px 10px 4px; display: flex; align-items: center; gap: 8px; font: 700 12px/1 var(--f-body); letter-spacing: 0.08em; text-transform: uppercase; }
+.list .grp .pd { width: 9px; height: 9px; border-radius: 50%; background: var(--c); }
+.list .grp .gs { margin-left: auto; font: 500 11px/1 var(--f-data); color: var(--ink-2); letter-spacing: 0; text-transform: none; }
+.row {
+  appearance: none; width: 100%; text-align: left; background: transparent; border: 0; border-radius: 10px;
+  padding: 9px 10px; display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: center; cursor: pointer;
+}
+.row:hover { background: var(--chip); }
+.row[aria-expanded="true"] { background: var(--chip); }
+.row.mull { opacity: 0.72; }
+.row.playing { box-shadow: inset 3px 0 0 var(--pc, var(--accent)); animation: playpulse 1.1s ease-in-out infinite alternate; }
+@keyframes playpulse {
+  from { background: color-mix(in srgb, var(--pc, var(--accent)) 8%, transparent); }
+  to { background: color-mix(in srgb, var(--pc, var(--accent)) 28%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) { .row.playing { animation: none; background: color-mix(in srgb, var(--pc, var(--accent)) 18%, transparent); } }
+.badge {
+  width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center;
+  background: var(--c); color: #10160F; font: 600 12px/1 var(--f-data);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+.badge.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--c); }
+.what { min-width: 0; display: grid; gap: 3px; }
+.club { font: 600 14px/1.15 var(--f-body); }
+.lie { font: 400 12px/1.3 var(--f-body); color: var(--ink-2); }
+.nums { display: grid; justify-items: end; gap: 2px; font: 500 11px/1.2 var(--f-data); color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.nums b { font-weight: 600; font-size: 14px; color: var(--ink); }
+.detail { margin: 2px 10px 10px 46px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 12px; }
+.detail div { min-width: 0; }
+.detail .k { display: block; font: 600 9.5px/1 var(--f-body); text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-2); }
+.detail .v { display: block; margin-top: 4px; font: 500 13px/1.1 var(--f-data); font-variant-numeric: tabular-nums; }
+.note { margin: 0; padding: 10px 16px 12px; border-top: 1px solid var(--line); font: 400 11.5px/1.45 var(--f-body); color: var(--ink-2); }
+.note a, .attrib a { color: inherit; }
+.attrib { position: fixed; left: 50%; bottom: calc(1px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 5; font: 400 10px/1.4 var(--f-body); color: var(--ink-2); background: var(--panel); padding: 0 6px; border-radius: 4px; white-space: nowrap; }
+.note b { font-weight: 600; color: var(--ink); }
+
+/* scorecard */
+.scorecard {
+  left: calc(16px + env(safe-area-inset-left, 0px));
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  max-width: calc(100% - 32px - 352px - 16px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+  padding: 8px 10px;
+}
+.sc-wrap { overflow-x: auto; }
+.sc { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.sc th, .sc td { padding: 0; text-align: center; }
+.sc thead th { font: 600 10px/1 var(--f-data); color: var(--ink-2); height: 20px; min-width: 30px; }
+.sc th[scope="row"] { text-align: left; padding-right: 8px; font: 600 10px/1 var(--f-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-2); white-space: nowrap; }
+.sc .par td { font: 500 11px/1 var(--f-data); color: var(--ink-2); height: 18px; }
+.sc .sum { font-weight: 600; color: var(--ink); }
+.sc .tot { border-left: 1px solid var(--line); }
+.sc .gap { border-left: 1px solid var(--line); }
+.sc td.cur, .sc th.cur { background: var(--chip); }
+.sc thead th.cur { color: var(--ink); }
+.sc button.hb { appearance: none; border: 0; background: transparent; cursor: pointer; width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border-radius: 7px; }
+.sc button.hb:hover { background: var(--chip); }
+.sc thead button.hb { height: 20px; font: 600 10px/1 var(--f-data); color: inherit; }
+.pbtn { appearance: none; border: 0; background: transparent; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 4px 4px 4px 0; font: 600 12px/1 var(--f-body); color: var(--ink-2); text-transform: none; letter-spacing: 0; max-width: 120px; }
+.pbtn .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pbtn .pd { width: 8px; height: 8px; border-radius: 50%; background: var(--c); flex: none; }
+.prow.sel .pbtn { color: var(--ink); }
+.prow.dim td { opacity: 0.45; }
+.ptot { font: 800 17px/1 var(--f-display); padding: 0 6px !important; white-space: nowrap; }
+.ptot small { font: 500 10px/1 var(--f-data); color: var(--ink-2); margin-left: 3px; }
+.hs { font: 800 17px/1 var(--f-display); width: 23px; height: 23px; display: grid; place-items: center; position: relative; }
+.hs.birdie { border: 1.5px solid currentColor; border-radius: 50%; color: var(--under); }
+.hs.eagle { border: 1.5px solid currentColor; border-radius: 50%; box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px currentColor; color: var(--under); }
+.hs.bogey { border: 1.5px solid currentColor; border-radius: 3px; }
+.hs.double { border: 1.5px solid currentColor; border-radius: 3px; box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px currentColor; }
+.hs.live::after { content: ""; position: absolute; right: -4px; top: -2px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+
+/* in-scene markers (constant screen size) */
+.mk { position: relative; width: 0; height: 0; }
+.mk .dot { position: absolute; left: -5px; top: -5px; width: 10px; height: 10px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 2.5px var(--c), 0 1px 4px rgba(0, 0, 0, 0.45); pointer-events: auto; cursor: pointer; }
+.mk .num { position: absolute; left: 0; bottom: 10px; transform: translateX(-50%); background: var(--c); color: #10160F; font: 600 11px/1 var(--f-data); padding: 3px 5px 3px; border-radius: 5px; white-space: nowrap; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35); pointer-events: auto; cursor: pointer; }
+.mk.hz .dot { background: var(--c); border-radius: 2px; transform: rotate(45deg); }
+.mk.ml .dot { background: transparent; box-shadow: 0 0 0 2px var(--c); }
+.mk.ml .num { background: rgba(255, 255, 255, 0.85); }
+.mk.ob .num { bottom: 34px; }   /* stroke and distance lands on the tee: sit above the TEE tag */
+.land { width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--c); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25); }
+.ballmk { width: 10px; height: 10px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.3), 0 0 14px 4px rgba(255, 255, 255, 0.85); }
+.anchor { position: relative; width: 0; height: 0; }
+.tag { position: absolute; left: 0; top: 0; font: 600 10px/1 var(--f-body); letter-spacing: 0.1em; text-transform: uppercase; color: #fff; background: rgba(14, 22, 18, 0.72); padding: 4px 6px; border-radius: 4px; white-space: nowrap; transform: translate(-50%, calc(-100% - 6px)); }
+.tag.warn { background: rgba(170, 36, 24, 0.88); transform: translate(-50%, calc(-100% - 34px)); }
+.tag.putt { background: rgba(255, 255, 255, 0.92); color: #14211A; transform: translate(-50%, 12px); }
+.hl { appearance: none; border: 2px solid #fff; background: #14211A; color: #fff; font: 800 15px/1 var(--f-display); width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; cursor: pointer; pointer-events: auto; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); }
+.hl:hover { background: #C93A22; }
+.cheer { position: absolute; left: 0; top: 0; white-space: nowrap; font: 900 22px/1 var(--f-display); letter-spacing: 0.05em; text-transform: uppercase; color: #10160F; background: linear-gradient(180deg, #FFE68A, #FFC21F); padding: 7px 12px 6px; border-radius: 8px; box-shadow: 0 0 0 2.5px var(--c, #fff), 0 8px 22px rgba(0, 0, 0, 0.35); transform: translate(-50%, calc(-100% - 28px)); animation: cheer 2.7s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
+.cheer.big { font-size: 30px; padding: 9px 16px 8px; }
+@keyframes cheer {
+  0% { opacity: 0; transform: translate(-50%, calc(-100% - 6px)) scale(0.4); }
+  13% { opacity: 1; transform: translate(-50%, calc(-100% - 34px)) scale(1.14); }
+  22% { transform: translate(-50%, calc(-100% - 28px)) scale(1); }
+  80% { opacity: 1; transform: translate(-50%, calc(-100% - 32px)) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, calc(-100% - 50px)) scale(0.96); }
+}
+.stiff { display: inline-flex; align-items: center; gap: 4px; margin-left: 7px; font: 700 9.5px/1 var(--f-body); letter-spacing: 0.08em; text-transform: uppercase; color: #5C4100; background: #FFE27A; padding: 3px 6px 3px 4px; border-radius: 999px; vertical-align: 2px; }
+.stiff svg { width: 11px; height: 11px; }
+.stiff.bomb { color: #FFFFFF; background: linear-gradient(180deg, #FF8A3D, #E8432E); }
+.cheer.bird { color: #FFFFFF; background: var(--c); box-shadow: 0 0 0 2.5px #FFFFFF, 0 8px 22px rgba(0, 0, 0, 0.35); text-shadow: 0 1px 0 rgba(0, 0, 0, 0.25); }
+.cheer.alba { color: #0E2A47; background: linear-gradient(180deg, #FFFFFF, #CFE6FF); box-shadow: 0 0 0 2.5px var(--c), 0 0 28px rgba(170, 215, 255, 0.95), 0 8px 22px rgba(0, 0, 0, 0.35); }
+.ace { position: fixed; left: 50%; top: 36%; z-index: 99999; pointer-events: none; text-align: center; transform: translate(-50%, -50%); animation: ace-in 6.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
+.ace-t { font: 900 clamp(52px, 11vw, 150px)/0.9 var(--f-display); letter-spacing: 0.02em; text-transform: uppercase; white-space: nowrap; color: transparent; background: linear-gradient(100deg, #FFB800 0%, #FFE680 38%, #FFFFFF 50%, #FFE680 62%, #FFB800 100%); background-size: 250% 100%; background-position: 100% 0; -webkit-background-clip: text; background-clip: text; -webkit-text-stroke: 1.5px rgba(90, 55, 0, 0.35); filter: drop-shadow(0 4px 0 rgba(60, 35, 0, 0.6)) drop-shadow(0 0 26px rgba(255, 190, 40, 0.75)); animation: ace-shine 1.8s linear 0.45s 2; }
+.ace-s { display: inline-block; margin-top: 12px; font: 700 clamp(12px, 1.6vw, 17px)/1 var(--f-body); letter-spacing: 0.08em; text-transform: uppercase; color: #FFFFFF; background: var(--c); padding: 8px 15px; border-radius: 999px; box-shadow: 0 0 0 2px #FFFFFF, 0 8px 22px rgba(0, 0, 0, 0.35); }
+@keyframes ace-in { 0% { opacity: 0; transform: translate(-50%, -50%) scale(2.4); } 8% { opacity: 1; transform: translate(-50%, -50%) scale(0.93); } 13% { transform: translate(-50%, -50%) scale(1.04); } 18%, 84% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.05); } }
+@keyframes ace-shine { from { background-position: 100% 0; } to { background-position: -150% 0; } }
+@media (prefers-reduced-motion: reduce) { .ace, .ace-t { animation: none; } .ace { animation: ace-fade 6.4s linear forwards; } }
+@keyframes ace-fade { 0%, 90% { opacity: 1; } 100% { opacity: 0; } }
+.ring-tag { position: absolute; left: 0; top: 0; transform: translate(6px, -50%); white-space: nowrap; font: 700 10px/1 var(--f-body); letter-spacing: 0.06em; color: #10160F; background: #FFFFFF; padding: 3px 5px; border-radius: 4px; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3); }
+.cheer.hot { color: #FFFFFF; background: linear-gradient(180deg, #FF9A3D, #E3361F); text-shadow: 0 1px 0 rgba(0, 0, 0, 0.25); }
+.ballmk.hot { background: #FFF6D6; box-shadow: 0 0 0 2px #FF8A00, 0 0 16px 7px rgba(255, 120, 0, 0.9), 0 0 34px 14px rgba(255, 60, 0, 0.45); }
+@media (prefers-reduced-motion: reduce) { .cheer { animation: none; } }
+.fallback { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; font: 500 14px/1.5 var(--f-body); }
+
+@media (max-width: 1100px) and (min-width: 761px) { .shots { width: 316px; } .scorecard { max-width: calc(100% - 32px - 316px - 16px); } }
+@media (max-width: 760px) {
+  .hole-card { left: calc(12px + env(safe-area-inset-left, 0px)); right: calc(12px + env(safe-area-inset-right, 0px)); width: auto; top: calc(12px + env(safe-area-inset-top, 0px)); padding: 11px 13px; gap: 8px; }
+  .sign { gap: 12px; }
+  .big { font-size: 50px; }
+  .big.word { font-size: 32px; }
+  .mid { font-size: 23px; }
+  .facts { gap: 12px; }
+  .meta { font-size: 10px; }
+  .kbd, .shot-img { display: none; }
+  .btn { padding: 7px 10px; }
+  .shots { top: auto; right: calc(12px + env(safe-area-inset-right, 0px)); left: calc(12px + env(safe-area-inset-left, 0px)); width: auto; bottom: calc(132px + env(safe-area-inset-bottom, 0px)); height: 24vh; }
+  .shots header { padding: 9px 14px 7px; }
+  .shots h2 { font-size: 19px; }
+  .note { display: none; }
+  .scorecard { left: calc(12px + env(safe-area-inset-left, 0px)); right: calc(12px + env(safe-area-inset-right, 0px)); max-width: none; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); padding: 6px 8px; }
+  .sc thead th { min-width: 26px; }
+  .sc button.hb { width: 26px; height: 26px; }
+  .hs { font-size: 15px; width: 21px; height: 21px; }
+  .pbtn { max-width: 74px; }
+}
+@media (max-width: 760px) and (max-height: 700px) { .shots { height: 19vh; } }
+</style>
+
+<div id="stage" aria-label="3D view of the round"></div>
+
+<section class="card hole-card" aria-live="polite">
+  <button class="theme-btn" id="b-theme" type="button" aria-label="Switch to dark mode" title="Light / dark mode">
+    <svg class="i-moon" viewBox="0 0 16 16" fill="currentColor"><path d="M13.6 10.4A6 6 0 0 1 5.6 2.4a6 6 0 1 0 8 8Z"/></svg>
+    <svg class="i-sun" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="8" r="3" fill="currentColor" stroke="none"/><path d="M8 1v1.6M8 13.4V15M1 8h1.6M13.4 8H15M3 3l1.1 1.1M11.9 11.9 13 13M3 13l1.1-1.1M11.9 4.1 13 3"/></svg>
+  </button>
+  <div class="meta" id="meta"></div>
+  <div class="sign">
+    <div><span class="lbl" id="h-label">Hole</span><span class="big" id="h-num">1</span></div>
+    <div class="facts">
+      <div><span class="lbl">Par</span><span class="mid" id="h-par">4</span></div>
+      <div><span class="lbl">Yards</span><span class="mid" id="h-yds">0</span></div>
+      <div><span class="lbl" id="h-score-l">Score</span><span class="mid" id="h-score">0</span></div>
+    </div>
+  </div>
+  <div class="result" id="h-result"></div>
+  <div class="nav">
+    <button class="btn icon" id="b-prev" aria-label="Previous hole"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 5 8l5 5"/></svg></button>
+    <button class="btn icon" id="b-next" aria-label="Next hole"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 3 5 5-5 5"/></svg></button>
+    <button class="btn" id="b-all" aria-pressed="false">All holes</button>
+    <button class="btn" id="b-play"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.8v10.4c0 .5.6.8 1 .5l8-5.2a.6.6 0 0 0 0-1L5 2.3c-.4-.3-1 0-1 .5Z"/></svg><span>Replay hole</span></button>
+  </div>
+  <div class="seg" id="who" role="group" aria-label="Player"></div>
+  <div class="kbd">← → hole · P player · A all holes · Space replay · drag to orbit</div>
+</section>
+
+<aside class="card shots" aria-label="Shots">
+  <header><h2 id="s-title">Shots</h2><span class="sub" id="s-sub"></span></header>
+  <button class="shot-img" id="s-fig" type="button" hidden aria-expanded="false" aria-label="Enlarge the in-game tee view"><img id="s-img" alt=""><span class="cap" id="s-cap"></span><span class="zoom" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9 7M2.5 13.5 7 9"/></svg></span></button>
+  <ol class="list" id="s-list"></ol>
+  <p class="note" id="s-note"><b>Sample render.</b> Shots and scores come from currentRound.dat; tees, pins, aim lines, penalty areas and the boundary come from the course's GreenKeeper file. The ground, fairways, extra bunkers and trees are a placeholder shaped to recorded ball heights. Club names are inferred from GSPro's club numbers.</p>
+</aside>
+
+<nav class="card scorecard" aria-label="Scorecard"><div class="sc-wrap"><table class="sc" id="sc"></table></div></nav>
+
+<div class="lightbox" id="lb" hidden><figure><img id="lb-img" alt=""><figcaption id="lb-cap"></figcaption></figure></div>
+
+<script type="application/json" id="round-data">__ROUND_DATA__</script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { Line2 } from 'three/addons/lines/Line2.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+const DATA = JSON.parse(document.getElementById('round-data').textContent);
+const C = DATA.course, PL = DATA.players, NH = C.holes.length;
+const YD = 1.0936133, FT = 3.28084;
+const STIFF_FROM = 50 / YD, STIFF_IN = 10 / FT;  // celebrate approaches from 50+ yards that finish inside 10 feet
+const BOMB_CARRY = 240;                           // drives carrying this many yards explode off the tee
+let FX_TIME = 1;                                  // effect clock rate (1 = real time)
+const PALETTE = ['#FF5B3F', '#FFC93D', '#45CFFF', '#FF77D4', '#FFFFFF', '#B18CFF', '#FF9A45', '#64F0C6'];
+const PCOL = ['#FF6A3D', '#3FC6FF', '#FFD23F', '#B990FF'];
+const MULL = '#E4E9E4';
+const strokeColor = n => PALETTE[(n - 1) % PALETTE.length];
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const $ = id => document.getElementById(id);
+const v3 = a => new THREE.Vector3(a[0], a[1], a[2]);
+const CLUBS = { 0: 'Driver', 2: '3 wood', 17: '5 iron', 18: '6 iron', 19: '7 iron', 20: '8 iron', 21: '9 iron', 22: 'Pitching wedge', 23: 'Gap wedge', 24: 'Sand wedge', 25: 'Lob wedge', 26: 'Putter' };
+const clubName = c => CLUBS[c] || `Club ${c}`;
+const SCORE_NAMES = { '-3': 'Albatross', '-2': 'Eagle', '-1': 'Birdie', '0': 'Par', '1': 'Bogey', '2': 'Double bogey', '3': 'Triple bogey' };
+const scoreName = d => SCORE_NAMES[d] || `+${d}`;
+const toPar = d => (d === 0 ? 'E' : d > 0 ? `+${d}` : `${d}`);
+const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+
+// ---------------------------------------------------------------- renderer
+const stage = $('stage');
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); }
+catch (err) { document.body.insertAdjacentHTML('beforeend', '<div class="fallback">This view needs WebGL, which this browser has turned off.</div>'); throw err; }
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setSize(innerWidth, innerHeight);
+stage.appendChild(renderer.domElement);
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.setSize(innerWidth, innerHeight);
+labelRenderer.domElement.className = 'labels';
+stage.appendChild(labelRenderer.domElement);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0xd6e2dc, 800, 4000);
+const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 2, 30000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.08;
+controls.maxPolarAngle = Math.PI * 0.46; controls.minDistance = 20; controls.maxDistance = 12000;
+controls.screenSpacePanning = false;
+const hemi = new THREE.HemisphereLight(0xe2efff, 0x5a4a33, 1.05);
+const sun = new THREE.DirectionalLight(0xfff0d8, 1.75);
+sun.position.set(-420, 640, 300);
+scene.add(hemi, sun);
+
+// ---------------------------------------------------------------- terrain
+const T = DATA.terrain;
+const b64 = s => { const bin = atob(s); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; };
+const NX = T.nx, NZ = T.nz, CELL = T.cell;
+const H = new Float32Array(NX * NZ);
+{ const dv = new DataView(b64(T.h).buffer); for (let k = 0; k < H.length; k++) H[k] = dv.getInt16(k * 2, true) / 10; }
+const CLS = T.cls ? b64(T.cls) : null;
+function groundY(x, z) {
+  const fx = (x - T.x0) / CELL, fz = (z - T.z0) / CELL;
+  const i = Math.max(0, Math.min(NX - 2, Math.floor(fx))), j = Math.max(0, Math.min(NZ - 2, Math.floor(fz)));
+  const u = fx - i, w = fz - j;
+  const h00 = H[j * NX + i], h10 = H[j * NX + i + 1], h01 = H[(j + 1) * NX + i], h11 = H[(j + 1) * NX + i + 1];
+  return (u + w <= 1) ? h00 + u * (h10 - h00) + w * (h01 - h00) : h11 + (1 - u) * (h01 - h11) + (1 - w) * (h10 - h11);
+}
+// 0 natural, 1 rough, 2 fairway, 3 green, 4 tee, 5 bunker, 6 penalty area, 7 cart path, 8 fringe, 9 deep rough,
+// 10 rock (steep ground), 11 shoreline, 12 seabed (under the sea surface), 13 water, 14 building
+const SURF = { 0: '#8E9F63', 1: '#6E9E48', 2: '#8BC756', 3: '#A6DB63', 4: '#93CC5A', 5: '#E9DAA8', 6: '#7C7146', 7: '#CFC8B8', 8: '#98D15E', 9: '#5B8A3E', 10: '#9A8670', 11: '#D9C99A', 12: '#3F7F86', 13: '#4A9CC4', 14: '#B9A48E' };
+const seaMat = new THREE.MeshLambertMaterial({ color: '#3A93B8', transparent: true, opacity: 0.94 });
+const seaSide = new THREE.MeshLambertMaterial({ color: '#2C6F8E', side: THREE.DoubleSide, transparent: true, opacity: 0.9 });
+(function buildTerrain() {
+  const cells = (NX - 1) * (NZ - 1);
+  const pos = new Float32Array(cells * 18), col = new Float32Array(cells * 18);
+  const base = {}; for (const k in SURF) base[k] = new THREE.Color(SURF[k]);
+  const c = new THREE.Color();
+  let p = 0;
+  const hash = (a, b, t) => { const s = Math.sin(a * 12.9898 + b * 78.233 + t * 37.719) * 43758.5453; return s - Math.floor(s); };
+  const tex = T.tex, uv = tex ? new Float32Array(cells * 12) : null;
+  let q = 0;
+  const tri = (cls, i, j, t, cx, cz, ax, ay, az, bx, by, bz, qx, qy, qz) => {
+    let f = 0.965 + hash(i, j, t) * 0.07;
+    if (tex) {
+      // the surface comes from the texture; each facet just shades it a touch, for the low-poly look
+      c.setRGB(f, f, f);
+      uv[q] = (ax - T.x0) / tex.w; uv[q + 1] = (az - T.z0) / tex.h; uv[q + 2] = (bx - T.x0) / tex.w; uv[q + 3] = (bz - T.z0) / tex.h; uv[q + 4] = (qx - T.x0) / tex.w; uv[q + 5] = (qz - T.z0) / tex.h; q += 6;
+    } else {
+      if (cls === 2 || cls === 4) f *= (Math.floor((cx * 0.62 + cz * 0.78) / 11) & 1) ? 1.06 : 0.95;
+      if (cls === 6 || cls === 10) f *= 0.92 + hash(j, i, t) * 0.16;
+      c.copy(base[cls] || base[0]).multiplyScalar(f);
+    }
+    pos[p] = ax; pos[p + 1] = ay; pos[p + 2] = az; pos[p + 3] = bx; pos[p + 4] = by; pos[p + 5] = bz; pos[p + 6] = qx; pos[p + 7] = qy; pos[p + 8] = qz;
+    for (let k = 0; k < 3; k++) { col[p + k * 3] = c.r; col[p + k * 3 + 1] = c.g; col[p + k * 3 + 2] = c.b; }
+    p += 9;
+  };
+  for (let j = 0; j < NZ - 1; j++) {
+    for (let i = 0; i < NX - 1; i++) {
+      const X0 = T.x0 + i * CELL, X1 = X0 + CELL, Z0 = T.z0 + j * CELL, Z1 = Z0 + CELL;
+      const h00 = H[j * NX + i], h10 = H[j * NX + i + 1], h01 = H[(j + 1) * NX + i], h11 = H[(j + 1) * NX + i + 1];
+      const ci = (j * (NX - 1) + i) * 2;
+      tri(CLS ? CLS[ci] : 0, i, j, 0, X0 + CELL / 3, Z0 + CELL / 3, X0, h00, Z0, X0, h01, Z1, X1, h10, Z0);
+      tri(CLS ? CLS[ci + 1] : 0, i, j, 1, X0 + 2 * CELL / 3, Z0 + 2 * CELL / 3, X1, h10, Z0, X0, h01, Z1, X1, h11, Z1);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.computeVertexNormals();
+  const groundMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+  if (tex) {
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    const map = new THREE.TextureLoader().load(tex.src, () => { groundMat.needsUpdate = true; });
+    map.flipY = false;                      // row 0 of the image is the grid's first row
+    map.colorSpace = THREE.SRGBColorSpace;
+    map.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    groundMat.map = map;
+  }
+  scene.add(new THREE.Mesh(g, groundMat));
+  let minH = Infinity; for (const h of H) minH = Math.min(minH, h);
+  const baseY = minH - 28, sk = [];
+  const edge = pts => { for (let k = 0; k < pts.length - 1; k++) { const [ax, ay, az] = pts[k], [bx, by, bz] = pts[k + 1]; sk.push(ax, ay, az, bx, by, bz, ax, baseY, az, bx, by, bz, bx, baseY, bz, ax, baseY, az); } };
+  const xs = [], xe = [], zs = [], ze = [];
+  for (let i = 0; i < NX; i++) { xs.push([T.x0 + i * CELL, H[i], T.z0]); xe.push([T.x0 + i * CELL, H[(NZ - 1) * NX + i], T.z0 + (NZ - 1) * CELL]); }
+  for (let j = 0; j < NZ; j++) { zs.push([T.x0, H[j * NX], T.z0 + j * CELL]); ze.push([T.x0 + (NX - 1) * CELL, H[j * NX + NX - 1], T.z0 + j * CELL]); }
+  edge(xs); edge(xe); edge(zs); edge(ze);
+  const sg = new THREE.BufferGeometry();
+  sg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(sk), 3));
+  sg.computeVertexNormals();
+  scene.add(new THREE.Mesh(sg, new THREE.MeshLambertMaterial({ color: '#6E5038', side: THREE.DoubleSide, flatShading: true })));
+  if (T.sea != null) {
+    // the ocean: a surface at sea level over the whole model, and water walls on its sides
+    const X0 = T.x0 - 0.3, X1 = T.x0 + (NX - 1) * CELL + 0.3, Z0 = T.z0 - 0.3, Z1 = T.z0 + (NZ - 1) * CELL + 0.3, y = T.sea, b = baseY - 0.3;
+    const top = new THREE.PlaneGeometry(X1 - X0, Z1 - Z0); top.rotateX(-Math.PI / 2); top.translate((X0 + X1) / 2, y, (Z0 + Z1) / 2);
+    scene.add(new THREE.Mesh(top, seaMat));
+    const w = [];
+    for (const [ax, az, bx, bz] of [[X0, Z0, X1, Z0], [X1, Z0, X1, Z1], [X1, Z1, X0, Z1], [X0, Z1, X0, Z0]]) w.push(ax, y, az, bx, y, bz, ax, b, az, bx, y, bz, bx, b, bz, ax, b, az);
+    const wg = new THREE.BufferGeometry(); wg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(w), 3)); wg.computeVertexNormals();
+    scene.add(new THREE.Mesh(wg, seaSide));
+  }
+})();
+
+// ---------------------------------------------------------------- trees and stakes
+(function buildTrees() {
+  const n = DATA.trees.n;
+  const xyzh = new Int16Array(b64(DATA.trees.xyzh).buffer), kind = b64(DATA.trees.kind);
+  const crownR = DATA.trees.r ? b64(DATA.trees.r) : null;   // real trees: each crown's measured radius (decimetres)
+  const cone = new THREE.ConeGeometry(1, 1, 6); cone.translate(0, 0.5, 0);
+  const crown = new THREE.IcosahedronGeometry(1, 0);
+  const trunk = new THREE.CylinderGeometry(0.5, 0.7, 1, 5); trunk.translate(0, 0.5, 0);
+  const leaf = new THREE.MeshLambertMaterial({ flatShading: true });
+  const bark = new THREE.MeshLambertMaterial({ color: '#6B4B30', flatShading: true });
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), c = new THREE.Color(), up = new THREE.Vector3(0, 1, 0);
+  let np = 0, nb = 0; for (let k = 0; k < n; k++) (kind[k] ? nb++ : np++);
+  const mk = (geo, mat, cnt) => { const im = new THREE.InstancedMesh(geo, mat, cnt); scene.add(im); return im; };
+  const pc = mk(cone, leaf, np), pt = mk(trunk, bark, np), bc = mk(crown, leaf, nb), bt = mk(trunk, bark, nb);
+  let ip = 0, ib = 0;
+  for (let k = 0; k < n; k++) {
+    const x = T.x0 + xyzh[k * 4] / 10, z = T.z0 + xyzh[k * 4 + 1] / 10, y = xyzh[k * 4 + 2] / 10, h = xyzh[k * 4 + 3] / 10;
+    q.setFromAxisAngle(up, (k * 2.39) % 6.28);
+    const r = crownR ? crownR[k] / 10 : null;
+    if (!kind[k]) {
+      // a column: cone from 16% of the height to the top
+      const w = r ? Math.min(r, h * 0.3) : h * 0.25;
+      p.set(x, y + h * 0.16, z); s.set(w, h * 0.86, w); m.compose(p, q, s); pc.setMatrixAt(ip, m);
+      c.setHSL(0.36 + ((k * 7) % 10) * 0.004, 0.42, 0.24 + ((k * 13) % 10) * 0.006); pc.setColorAt(ip, c);
+      p.set(x, y - 0.5, z); s.set(Math.max(0.25, Math.min(0.55, w * 0.2)), h * 0.24, Math.max(0.25, Math.min(0.55, w * 0.2))); m.compose(p, q, s); pt.setMatrixAt(ip, m); ip++;
+    } else if (r) {
+      // a spreading crown at its measured width, as deep as the tree allows (kiawe come out low and wide)
+      const cd = Math.min(h * 0.62, Math.max(1.4, r * 1.25)), tr = Math.max(0.2, Math.min(0.7, r * 0.12));
+      p.set(x, y + h - cd / 2, z); s.set(r, cd / 2, r); m.compose(p, q, s); bc.setMatrixAt(ib, m);
+      c.setHSL(0.25 + ((k * 7) % 10) * 0.007, 0.4, 0.25 + ((k * 3) % 10) * 0.009); bc.setColorAt(ib, c);
+      p.set(x, y - 0.5, z); s.set(tr, h - cd * 0.7 + 0.5, tr); m.compose(p, q, s); bt.setMatrixAt(ib, m); ib++;
+    } else {
+      p.set(x, y + h * 0.62, z); s.set(h * 0.32, h * 0.36, h * 0.32); m.compose(p, q, s); bc.setMatrixAt(ib, m);
+      c.setHSL(0.27 + ((k * 7) % 10) * 0.006, 0.45, 0.28 + ((k * 3) % 10) * 0.008); bc.setColorAt(ib, c);
+      p.set(x, y - 0.5, z); s.set(0.6, h * 0.5, 0.6); m.compose(p, q, s); bt.setMatrixAt(ib, m); ib++;
+    }
+  }
+  const stakeG = new THREE.CylinderGeometry(0.22, 0.22, 2.6, 5); stakeG.translate(0, 1.3, 0);
+  for (const [list, color] of [[DATA.stakes.red, '#D63A2A'], [DATA.stakes.white, '#F2F2EC']]) {
+    if (!list.length) continue;
+    const st = mk(stakeG, new THREE.MeshLambertMaterial({ color }), list.length);
+    list.forEach((a, k) => { p.set(a[0], groundY(a[0], a[1]), a[1]); m.compose(p, new THREE.Quaternion(), new THREE.Vector3(1, 1, 1)); st.setMatrixAt(k, m); });
+  }
+})();
+
+// ---------------------------------------------------------------- helpers
+const lineMats = [];
+function makeLine(points, { color, width, opacity = 1, dashed = false, dash = 2.5, gap = 2, order = 2 }) {
+  const g = new LineGeometry();
+  g.setPositions(points.flatMap(p => [p.x, p.y, p.z]));
+  const mat = new LineMaterial({ linewidth: width, transparent: true, opacity, dashed, dashSize: dash, gapSize: gap, depthWrite: opacity >= 1 });
+  mat.color = new THREE.Color(color);
+  mat.resolution.set(innerWidth, innerHeight);
+  mat.userData.base = { opacity, width };
+  lineMats.push(mat);
+  const line = new Line2(g, mat);
+  if (dashed) line.computeLineDistances();
+  line.renderOrder = order;
+  return line;
+}
+function css(className, html, vars) {
+  const el = document.createElement('div');
+  el.className = className;
+  if (html) el.innerHTML = html;
+  if (vars) for (const k in vars) el.style.setProperty(k, vars[k]);
+  return el;
+}
+function label(el, pos) { const o = new CSS2DObject(el); o.position.copy(pos); scene.add(o); return o; }
+function onGround(p, lift = 0) { return new THREE.Vector3(p.x, Math.max(p.y, groundY(p.x, p.z)) + lift, p.z); }
+function fmtPin(m, lie) {
+  if (m < 0.25) return 'Holed';
+  const yd = m * YD;
+  if (lie === 'Green' || yd < 22) return `${Math.round(m * FT)} ft to pin`;
+  return `${Math.round(yd)} yd to pin`;
+}
+const horiz = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+
+// ---------------------------------------------------------------- course: pins, tees, hole labels
+const flagMat = new THREE.MeshLambertMaterial({ color: '#F2C318', side: THREE.DoubleSide });
+const poleMat = new THREE.MeshLambertMaterial({ color: '#F4F4EE' });
+const teeMat = new THREE.MeshLambertMaterial({ color: '#F4F4EE' });
+const holeLabels = [];
+C.holes.forEach((ch, hi) => {
+  const pin = v3(ch.pin); pin.y = groundY(pin.x, pin.z);
+  ch.pinV = pin; ch.teeV = v3(ch.tee); ch.aimV = ch.aims.map(v3);
+  const first = ch.aimV[0] || pin;
+  const dir = new THREE.Vector3().subVectors(first, ch.teeV).setY(0).normalize();
+  const fg = new THREE.Group(); fg.position.copy(pin); scene.add(fg); ch.flagGroup = fg;
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 8, 6), poleMat); pole.position.set(0, 4, 0); fg.add(pole);
+  const fs = new THREE.Shape(); fs.moveTo(0, 0); fs.lineTo(3.6, -1.05); fs.lineTo(0, -2.1); fs.lineTo(0, 0);
+  const flag = new THREE.Mesh(new THREE.ShapeGeometry(fs), flagMat);
+  const pd = new THREE.Vector3().subVectors(pin, ch.teeV).setY(0).normalize();
+  flag.position.set(0, 8, 0); flag.rotation.y = Math.atan2(pd.x, pd.z) + Math.PI / 2; fg.add(flag);
+  const cup = new THREE.Mesh(new THREE.CircleGeometry(0.9, 14), new THREE.MeshBasicMaterial({ color: '#1A231C', polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
+  cup.rotation.x = -Math.PI / 2; cup.position.set(0, 0.08, 0); fg.add(cup);
+  const perp = new THREE.Vector3(-dir.z, 0, dir.x);
+  for (const sgn of [-1, 1]) {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.9), teeMat);
+    const p = ch.teeV.clone().addScaledVector(perp, sgn * 3.5).addScaledVector(dir, -1.5);
+    b.position.set(p.x, groundY(p.x, p.z) + 0.45, p.z); scene.add(b);
+  }
+  // the hole's line of play (tee, aim points, pin), drawn faintly on the ground
+  const route = [ch.teeV, ...ch.aimV, pin].map(p => p.clone());
+  const routePts = [];
+  for (let k = 0; k < route.length - 1; k++) {
+    const a = route[k], b = route[k + 1], n = Math.max(2, Math.ceil(a.distanceTo(b) / 6));
+    for (let t = 0; t < n; t++) { const q = a.clone().lerp(b, t / n); q.y = groundY(q.x, q.z) + 0.3; routePts.push(q); }
+  }
+  const lp = pin.clone(); lp.y += 0.3; routePts.push(lp);
+  ch.routeLine = makeLine(routePts, { color: '#FFFFFF', width: 1.2, opacity: 0.38, dashed: true, dash: 5, gap: 5, order: 1 });
+  scene.add(ch.routeLine);
+  const btn = document.createElement('button');
+  btn.className = 'hl'; btn.textContent = ch.n; btn.setAttribute('aria-label', `Go to hole ${ch.n}`);
+  btn.addEventListener('click', () => goHole(hi));
+  const o = label(btn, onGround(ch.teeV, 4)); o.visible = false; holeLabels.push(o);
+  ch.teeTag = label(css('anchor', '<span class="tag">Tee</span>'), onGround(ch.teeV, 3));
+});
+
+// ---------------------------------------------------------------- shots, per player and hole
+function timeline(it) {
+  const pts = [], times = [];
+  if (it.flight.length > 1) {
+    const n = it.flight.length;
+    it.flight.forEach((p, k) => { pts.push(v3(p)); times.push((k / (n - 1)) * it.flightT); });
+  } else { pts.push(v3(it.start)); times.push(0); }
+  for (const r of it.roll) { if (r[3] > times[times.length - 1] + 1e-4) { pts.push(v3(r)); times.push(r[3]); } }
+  return { pts, times, total: times[times.length - 1] };
+}
+PL.forEach((pl, pi) => {
+  pl.holes.forEach((h, hi) => {
+    if (!h) return;
+    const ch = C.holes[hi];
+    h.group = new THREE.Group(); scene.add(h.group);
+    h.labels = [];
+    let lastRest = null, lastLie = null;
+    h.items.forEach((it, k) => {
+      it.p = pi; it.h = hi; it.k = k;
+      if (it.kind === 'shot' || it.kind === 'mulligan') {
+        const mull = it.kind === 'mulligan';
+        const flight = it.flight.map(v3);
+        const start = v3(it.start);
+        const roll = it.roll.map(r => new THREE.Vector3(r[0], Math.max(r[1], groundY(r[0], r[2])) + 0.12, r[2]));
+        it.lines = {};
+        if (flight.length > 1) {
+          const track = flight.map(p => new THREE.Vector3(p.x, groundY(p.x, p.z) + 0.35, p.z));
+          if (!mull) it.lines.halo = makeLine(flight, { color: '#08110C', width: 7, opacity: 0.28, order: 1 });
+          it.lines.flight = makeLine(flight, mull ? { color: MULL, width: 2, opacity: 0.75, dashed: true, dash: 4, gap: 3, order: 2 } : { color: '#fff', width: 3.2, order: 3 });
+          if (!mull) it.lines.track = makeLine(track, { color: '#08110C', width: 1.6, opacity: 0.3, dashed: true, dash: 3, gap: 3, order: 1 });
+        }
+        const rollPts = [flight.length > 1 ? flight[flight.length - 1] : onGround(start, 0.15), ...roll];
+        if (rollPts.length > 1) it.lines.roll = makeLine(rollPts, mull ? { color: MULL, width: 1.6, opacity: 0.7, order: 2 } : { color: '#fff', width: 2.2, order: 3 });
+        Object.values(it.lines).forEach(l => h.group.add(l));
+        it.tl = timeline(it);
+        const td = v3(it.td), end = v3(it.end);
+        if (flight.length > 1 && !mull) { it.landObj = label(css('land'), onGround(td, 0.2)); h.labels.push(it.landObj); }
+        const nearPin = !mull && !it.pen && it.toPinM > 0.25 && (it.toLie === 'Green' || it.toPinM < 12);
+        const badge = mull ? 'M' : nearPin ? `${it.stroke} · ${Math.round(it.toPinM * FT)} ft` : it.stroke;
+        const mk = css('mk' + (it.pen ? ' hz' : '') + (mull ? ' ml' : ''), `<span class="dot"></span><span class="num">${badge}</span>`);
+        mk.addEventListener('click', () => selectItem(pi, hi, k, true));
+        it.mkEl = mk;
+        it.restObj = label(mk, it.pen ? end : onGround(end, 0.2));
+        h.labels.push(it.restObj);
+        it.carryYd = horiz(start, td) * YD;
+        it.totalYd = horiz(start, end) * YD;
+        it.stiff = stiffness(it, start);
+        it.bomb = it.kind === 'shot' && !it.putt && (it.stroke === 1 || it.fromLie === 'Tee') && it.carryYd >= BOMB_CARRY ? { carry: Math.round(it.carryYd) } : null;
+        if (!mull) { lastRest = end; lastLie = it.toLie; }
+      } else if (it.kind === 'penalty') {
+        const drop = v3(it.drop);
+        it.lines = { pen: makeLine([onGround(lastRest, 0.4), onGround(drop, 0.4)], { color: '#E0442E', width: 2.4, dashed: true, dash: 1.6, gap: 1.2, order: 3 }) };
+        h.group.add(it.lines.pen);
+        const mk = css(it.ob ? 'mk ob' : 'mk', `<span class="dot"></span><span class="num">${it.ob ? 'OB · re-hit' : `${it.stroke} · drop`}</span>`, { '--c': '#FFFFFF' });
+        mk.addEventListener('click', () => selectItem(pi, hi, k, true));
+        it.restObj = label(mk, onGround(drop, 0.2)); h.labels.push(it.restObj);
+        lastRest = drop; lastLie = it.dropLie;
+      } else if (it.kind === 'putt' && !h.puttDrawn) {
+        h.puttDrawn = true;
+        const putts = h.items.filter(x => x.kind === 'putt');
+        const a = onGround(lastRest, 0.2), b = onGround(ch.pinV, 0.2);
+        // follow the green's surface rather than a straight chord over it
+        const steps = Math.max(2, Math.ceil(horiz(a, b) / 0.75)), path = [];
+        for (let k = 0; k <= steps; k++) { const q = a.clone().lerp(b, k / steps); q.y = groundY(q.x, q.z) + 0.2; path.push(q); }
+        it.lines = { putt: makeLine(path, { color: '#FFFFFF', width: 2, dashed: true, dash: 0.7, gap: 0.6, order: 3 }) };
+        it.puttPath = path;
+        h.group.add(it.lines.putt);
+        it.restObj = label(css('anchor', `<span class="tag putt">${putts.length} putt${putts.length > 1 ? 's' : ''}</span>`), a.clone().lerp(b, 0.5));
+        h.labels.push(it.restObj);
+        h.puttFrom = lastRest; h.puttFromM = lastRest ? horiz(lastRest, ch.pinV) : 0;
+      }
+    });
+    // the stroke that finished a birdie-or-better hole gets the score's celebration
+    if (h.complete && h.strokes < ch.par) {
+      const rev = [...h.items].reverse();
+      let last = rev.find(x => (x.kind === 'shot' || x.kind === 'putt') && x.holed) || rev.find(x => x.kind === 'shot' || x.kind === 'putt');
+      // auto-putts replay as one step (the first, which carries the line), so the score rides on that one
+      if (last && last.kind === 'putt' && !last.lines) last = h.items.find(x => x.kind === 'putt' && x.lines) || last;
+      if (last) { last.score = scoreKind(h.strokes, ch.par); if (last.score.kind === 'ace' && last.stiff) last.stiff.chip = 'Ace'; }
+    }
+  });
+});
+
+// ---------------------------------------------------------------- state
+const state = { hole: 0, all: false, who: 0, selected: null };
+const shown = () => (state.who === 'both' ? PL.map((_, i) => i) : [state.who]);
+let anim = null, afterReplay = null;
+const ball = label(css('ballmk'), new THREE.Vector3()); ball.visible = false;
+// the ball's shadow on the ground, straight below it: the clearest cue to where the ball is and how high
+const ballShadow = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'), r = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  r.addColorStop(0, 'rgba(0,0,0,0.9)'); r.addColorStop(0.45, 'rgba(0,0,0,0.65)'); r.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = r; g.fillRect(0, 0, 64, 64);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ color: '#000000', map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, depthTest: false }));
+  m.rotation.x = -Math.PI / 2; m.renderOrder = 5; m.visible = false; scene.add(m);
+  return m;
+})();
+function placeBallShadow() {
+  if (!ball.visible) { ballShadow.visible = false; ball.element.classList.remove('hot'); return; }
+  const p = ball.position, g = groundY(p.x, p.z), h = Math.max(0, p.y - g);
+  ballShadow.position.set(p.x, g + 0.08, p.z);
+  // about 9 px across at any zoom, a little larger and softer the higher the ball is
+  const r = Math.max(0.4, camera.position.distanceTo(ballShadow.position) * 0.011) * (1 + Math.min(0.6, h / 40));
+  ballShadow.scale.set(r, r, 1);
+  ballShadow.material.opacity = 0.95 - Math.min(0.3, h / 80);
+  ballShadow.visible = true;
+}
+
+var reelPlayerColors = false;   // during the highlight reel of a multi-player round, shots wear their player's colour
+function colorOf(it) { return it.kind === 'mulligan' ? MULL : state.who === 'both' || reelPlayerColors ? PCOL[it.p % PCOL.length] : strokeColor(it.stroke); }
+function recolor() {
+  PL.forEach(pl => pl.holes.forEach(h => h && h.items.forEach(it => {
+    if (it.kind !== 'shot' && it.kind !== 'mulligan') return;
+    const c = colorOf(it);
+    if (it.kind === 'shot') { it.lines.flight?.material.color.set(c); it.lines.roll?.material.color.set(c); }
+    it.mkEl.style.setProperty('--c', c);
+    if (it.landObj) it.landObj.element.style.setProperty('--c', c);
+  })));
+}
+function setVisibility() {
+  const vis = shown();
+  PL.forEach((pl, pi) => pl.holes.forEach((h, hi) => {
+    if (!h) return;
+    const on = (state.all || hi === state.hole) && vis.includes(pi);
+    h.group.visible = on;
+    for (const o of h.labels) o.visible = on && !state.all;
+  }));
+  C.holes.forEach((ch, hi) => { ch.teeTag.visible = !state.all && hi === state.hole; ch.routeLine.visible = state.all || hi === state.hole; });
+  holeLabels.forEach(o => (o.visible = state.all));
+  ball.visible = !!anim;
+}
+function dimOthers() {
+  const sel = state.selected;
+  PL.forEach((pl, pi) => pl.holes.forEach((h, hi) => h && h.items.forEach((it, k) => {
+    if (!it.lines) return;
+    const isSel = sel && sel[0] === pi && sel[1] === hi && sel[2] === k;
+    const dim = sel && !state.all && hi === state.hole && !isSel;
+    for (const l of Object.values(it.lines)) {
+      const b = l.material.userData.base;
+      l.material.opacity = b.opacity * (dim ? 0.28 : 1);
+      l.material.linewidth = isSel && l === it.lines.flight ? b.width * 1.45 : b.width;
+    }
+  })));
+}
+
+// ---------------------------------------------------------------- camera
+const _v = new THREE.Vector3();
+const fitBox = { x0: -0.88, x1: 0.88, y0: -0.84, y1: 0.84, block: null };
+let REEL_TOP = null;   // while the highlight reel runs: the bottom of its title card, which shots are framed below
+function fitDistance(points, target, dirToCam) {
+  const cam = camera.clone(); cam.updateProjectionMatrix();
+  let lo = 15, hi = 12000;
+  for (let it = 0; it < 30; it++) {
+    const mid = (lo + hi) / 2;
+    cam.position.copy(target).addScaledVector(dirToCam, mid); cam.lookAt(target); cam.updateMatrixWorld(true);
+    let ok = true;
+    for (const p of points) {
+      _v.copy(p).project(cam);
+      if (_v.z > 1 || _v.x < fitBox.x0 || _v.x > fitBox.x1 || _v.y < fitBox.y0 || _v.y > fitBox.y1) { ok = false; break; }
+      // keep shots out from under the hole card in the top-left corner
+      const b = fitBox.block;
+      if (b && _v.x < b.x && _v.y > b.y) { ok = false; break; }
+    }
+    if (ok) hi = mid; else lo = mid;
+  }
+  return hi;
+}
+function holePoints(hi) {
+  const ch = C.holes[hi];
+  const pts = [ch.teeV, ch.pinV, ...ch.aimV];
+  for (const pi of shown()) {
+    const h = PL[pi].holes[hi]; if (!h) continue;
+    h.items.forEach(it => {
+      if (it.kind === 'shot') { it.flight.forEach((p, k) => { if (k % 4 === 0) pts.push(v3(p)); }); pts.push(v3(it.end)); }
+      else if (it.kind === 'penalty') pts.push(v3(it.drop));
+    });
+  }
+  return pts;
+}
+function viewFor(points, azimuthDir, elevationDeg) {
+  const box = new THREE.Box3().setFromPoints(points);
+  const target = box.getCenter(new THREE.Vector3()); target.y = groundY(target.x, target.z);
+  const e = THREE.MathUtils.degToRad(elevationDeg);
+  const dirToCam = new THREE.Vector3(azimuthDir.x * Math.cos(e), Math.sin(e), azimuthDir.z * Math.cos(e)).normalize();
+  return { pos: target.clone().addScaledVector(dirToCam, fitDistance(points, target, dirToCam)), target };
+}
+// replays watch from the side of the hole with lower ground, so hills don't hide the flight
+function sideOf(hi) {
+  const ch = C.holes[hi], a = ch.teeV, b = ch.pinV;
+  const d = new THREE.Vector3().subVectors(b, a).setY(0).normalize(), perp = new THREE.Vector3(-d.z, 0, d.x);
+  let plus = 0, minus = 0;
+  for (const f of [0.25, 0.5, 0.75]) {
+    const q = a.clone().lerp(b, f);
+    for (const off of [60, 120]) { plus += groundY(q.x + perp.x * off, q.z + perp.z * off); minus += groundY(q.x - perp.x * off, q.z - perp.z * off); }
+  }
+  return { perp, sign: plus <= minus ? 1 : -1 };
+}
+function sideDir(hi, back, deg) {
+  const { perp, sign } = sideOf(hi), r = THREE.MathUtils.degToRad(deg);
+  return back.clone().multiplyScalar(Math.cos(r)).addScaledVector(perp, sign * Math.sin(r)).normalize();
+}
+function replayView(hi) {
+  const ch = C.holes[hi];
+  const back = new THREE.Vector3().subVectors(ch.teeV, ch.pinV).setY(0).normalize();
+  return viewFor(holePoints(hi), sideDir(hi, back, 12), 22);
+}
+function holeView(hi) {
+  const ch = C.holes[hi];
+  const back = new THREE.Vector3().subVectors(ch.teeV, ch.pinV).setY(0).normalize();
+  return viewFor(holePoints(hi), back, ch.par === 3 ? 34 : 40);
+}
+function shotView(hi, it) {
+  const ch = C.holes[hi], s = v3(it.start), e = v3(it.end);
+  const back = new THREE.Vector3().subVectors(s, e).setY(0);
+  if (back.lengthSq() < 1) back.subVectors(ch.teeV, ch.pinV).setY(0);
+  back.normalize();
+  const pts = [s, e, v3(it.td), ...it.flight.filter((_, k) => k % 3 === 0).map(v3)];
+  // a little of what lies ahead (up to 60 m toward the pin) so the shot sits in context without framing the whole hole
+  const ahead = horiz(e, ch.pinV);
+  if (ahead > 2) pts.push(e.clone().lerp(ch.pinV, Math.min(0.35, 60 / ahead)));
+  if (horiz(s, e) <= 25) pts.push(ch.pinV);
+  if (horiz(s, e) < 40) { const c = s.clone().lerp(e, 0.5); for (const [dx, dz] of [[24, 0], [-24, 0], [0, 24], [0, -24]]) pts.push(new THREE.Vector3(c.x + dx, c.y, c.z + dz)); }
+  if (it.putt) return viewFor(pts, sideDir(hi, back, 12), 28);
+  // down the line: low and just off the line behind each shot, so its shape (draw, fade, height) shows;
+  // the camera lifts and swings a little wider as the ball nears the pin
+  const f = THREE.MathUtils.clamp(1 - horiz(s, ch.pinV) / Math.max(1, horiz(ch.teeV, ch.pinV)), 0, 1);
+  return viewFor(pts, sideDir(hi, back, 8 + 10 * f), 15 + 9 * f);
+}
+function overviewView() {
+  const pts = []; C.holes.forEach((ch, hi) => pts.push(...holePoints(hi)));
+  const box = new THREE.Box3().setFromPoints(pts), size = box.getSize(new THREE.Vector3());
+  const portrait = innerHeight > innerWidth * 1.05;
+  const longX = size.x >= size.z;
+  // look across the long axis on wide screens, along it on tall ones
+  const az = (longX !== portrait) ? new THREE.Vector3(0.18, 0, 1) : new THREE.Vector3(1, 0, 0.18);
+  return viewFor(pts, az, portrait ? 62 : 52);
+}
+let tween = null;
+function flyTo(view, ms = 950) {
+  if (reduceMotion || ms === 0) { camera.position.copy(view.pos); controls.target.copy(view.target); controls.update(); tween = null; return; }
+  tween = { p0: camera.position.clone(), t0: controls.target.clone(), p1: view.pos, t1: view.target, start: performance.now(), ms };
+}
+function updateViewOffset() {
+  const w = innerWidth, hgt = innerHeight;
+  const panel = document.querySelector('.shots').getBoundingClientRect();
+  const card = document.querySelector('.hole-card').getBoundingClientRect();
+  const sc = document.querySelector('.scorecard').getBoundingClientRect();
+  const pTop = panel.height ? panel.top : hgt;   // the shot list can be tucked away (phones, during the highlight reel)
+  const F = w > 760 ? { l: 16, r: panel.left - 16, t: 16, b: sc.top - 10 } : { l: 8, r: w - 8, t: card.bottom + 8, b: Math.min(pTop, sc.top) - 8 };
+  const ox = w / 2 - (F.l + F.r) / 2, oy = hgt / 2 - (F.t + F.b) / 2;
+  const cxN = (F.l + F.r) / w - 1, cyN = 1 - (F.t + F.b) / hgt;
+  const hx = Math.max(0.15, ((F.r - F.l) / w) * 0.93), hy = Math.max(0.15, ((F.b - F.t) / hgt) * 0.9);
+  Object.assign(fitBox, { x0: cxN - hx, x1: cxN + hx, y0: cyN - hy, y1: cyN + hy });
+  fitBox.block = w > 760 ? { x: ((card.right + 10) / w) * 2 - 1, y: 1 - ((card.bottom + 10) / hgt) * 2 } : null;
+  if (REEL_TOP != null) fitBox.y1 = Math.min(fitBox.y1, 1 - ((REEL_TOP + 14) / hgt) * 2);
+  camera.setViewOffset(w, hgt, ox, oy, w, hgt);
+  camera.aspect = w / hgt; camera.updateProjectionMatrix();
+}
+
+// ---------------------------------------------------------------- UI: player switch, scorecard
+const pdot = (pi) => `<span class="pd" style="--c:${PCOL[pi % PCOL.length]}"></span>`;
+(function buildWho() {
+  const seg = $('who');
+  const opts = PL.map((p, i) => ({ v: i, html: `${pdot(i)}<span class="nm">${esc(p.name)}</span>` }));
+  if (PL.length > 1) opts.push({ v: 'both', html: '<span class="nm">Both</span>' });
+  else seg.hidden = true;
+  for (const o of opts) {
+    const b = document.createElement('button'); b.innerHTML = o.html; b.dataset.v = o.v;
+    b.addEventListener('click', () => setWho(o.v));
+    seg.appendChild(b);
+  }
+})();
+const front = C.holes.filter(h => h.n <= 9).map(h => C.holes.indexOf(h)), back = C.holes.filter(h => h.n > 9).map(h => C.holes.indexOf(h));
+function sums(pi, idxs) {
+  let s = 0, par = 0, done = 0;
+  for (const hi of idxs) { const h = PL[pi].holes[hi]; if (h && h.complete) { s += h.strokes; par += C.holes[hi].par; done++; } }
+  return { s, par, done, all: done === idxs.length };
+}
+function notation(h, par) {
+  if (!h) return '<span class="hs">–</span>';
+  if (!h.complete) return `<span class="hs live">${h.strokes}</span>`;
+  const d = h.strokes - par;
+  const cls = d <= -2 ? 'eagle' : d === -1 ? 'birdie' : d === 1 ? 'bogey' : d >= 2 ? 'double' : '';
+  return `<span class="hs ${cls}">${h.strokes}</span>`;
+}
+function buildScorecard() {
+  const t = $('sc');
+  const cols = []; // [{type:'hole', hi} | {type:'sum', idxs, label}]
+  front.forEach(hi => cols.push({ type: 'hole', hi }));
+  if (back.length) { cols.push({ type: 'sum', idxs: front, label: 'Out' }); back.forEach((hi, k) => cols.push({ type: 'hole', hi, gap: k === 0 })); cols.push({ type: 'sum', idxs: back, label: 'In' }); }
+  cols.push({ type: 'sum', idxs: C.holes.map((_, i) => i), label: 'Tot', tot: true });
+  let html = '<thead><tr><th scope="row">Hole</th>';
+  for (const c of cols) html += c.type === 'hole' ? `<th data-col="${c.hi}" class="${c.gap ? 'gap' : ''}"><button class="hb" data-hole="${c.hi}" aria-label="Hole ${C.holes[c.hi].n}">${C.holes[c.hi].n}</button></th>` : `<th class="sum ${c.tot ? 'tot' : 'gap'}">${c.label}</th>`;
+  html += '</tr></thead><tbody><tr class="par"><th scope="row">Par</th>';
+  for (const c of cols) html += c.type === 'hole' ? `<td data-col="${c.hi}" class="${c.gap ? 'gap' : ''}">${C.holes[c.hi].par}</td>` : `<td class="sum ${c.tot ? 'tot' : 'gap'}">${c.idxs.reduce((a, i) => a + C.holes[i].par, 0)}</td>`;
+  html += '</tr>';
+  PL.forEach((pl, pi) => {
+    html += `<tr class="prow" data-p="${pi}"><th scope="row"><button class="pbtn" data-p="${pi}" title="Show ${esc(pl.name)}">${pdot(pi)}<span class="nm">${esc(pl.name)}</span></button></th>`;
+    for (const c of cols) {
+      if (c.type === 'hole') html += `<td data-col="${c.hi}" class="${c.gap ? 'gap' : ''}"><button class="hb" data-hole="${c.hi}" aria-label="Hole ${C.holes[c.hi].n}, ${esc(pl.name)}">${notation(pl.holes[c.hi], C.holes[c.hi].par)}</button></td>`;
+      else { const s = sums(pi, c.idxs); html += `<td class="ptot ${c.tot ? 'tot' : 'gap'}">${s.done ? s.s : '–'}${c.tot && s.done ? `<small>${toPar(s.s - s.par)}</small>` : ''}</td>`; }
+    }
+    html += '</tr>';
+  });
+  t.innerHTML = html + '</tbody>';
+  t.querySelectorAll('button.hb').forEach(b => b.addEventListener('click', () => goHole(+b.dataset.hole)));
+  t.querySelectorAll('button.pbtn').forEach(b => b.addEventListener('click', () => setWho(+b.dataset.p)));
+}
+buildScorecard();
+function renderScorecardState() {
+  document.querySelectorAll('#sc [data-col]').forEach(el => el.classList.toggle('cur', !state.all && +el.dataset.col === state.hole));
+  document.querySelectorAll('#sc .prow').forEach(r => {
+    const pi = +r.dataset.p;
+    r.classList.toggle('sel', state.who === 'both' || state.who === pi);
+    r.classList.toggle('dim', state.who !== 'both' && state.who !== pi);
+  });
+  const cur = document.querySelector('#sc thead th.cur'), wrap = document.querySelector('.sc-wrap');
+  if (cur && wrap.scrollWidth > wrap.clientWidth) wrap.scrollLeft = cur.offsetLeft - wrap.clientWidth / 2 + cur.offsetWidth / 2;
+  document.querySelectorAll('#who button').forEach(b => b.setAttribute('aria-pressed', String(String(state.who) === b.dataset.v)));
+}
+
+// ---------------------------------------------------------------- UI: hole card and shot list
+// the calendar day the round was played, as it was on the player's clock (same for every viewer)
+{
+  const osm = '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
+  $('s-note').innerHTML = (T.source === 'lidar'
+      ? '<b>Real ground.</b> Elevation from public NOAA/USGS lidar, lined up to GSPro’s course to within a few centimetres. '
+      : '<b>Sample render.</b> The ground is a placeholder shaped to recorded ball heights. ') +
+    (T.tex ? `Fairways, greens, tees, bunkers, water, paths and buildings © ${osm} contributors. ` : 'Fairway and green shapes are approximations. ') +
+    (C.gkd === false
+      ? 'Shots and scores come from currentRound.dat. Without the course’s GreenKeeper file, pins are worked out from each shot’s distance to the hole and tees from where each hole was started. '
+      : 'Shots and scores come from currentRound.dat; tees, pins, aim lines, penalty areas and the boundary from the course’s GreenKeeper file. ') +
+    (DATA.trees.source === 'lidar' ? 'Trees are found in the lidar point cloud (position, height and crown size; shapes are a guess). ' : 'Trees are placeholders. ') +
+    'Club names are inferred from GSPro’s club numbers.';
+}
+if (T.tex) document.body.insertAdjacentHTML('beforeend', '<div class="attrib">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors · elevation NOAA/USGS</div>');
+const PLAYED = (() => {
+  const m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(DATA.playedDay || '');
+  const d = m ? new Date(+m[1], m[2] - 1, +m[3]) : DATA.played ? new Date(DATA.played) : null;
+  return d ? d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '';
+})();
+$('meta').innerHTML = `<b>${esc(C.name)}</b>${PLAYED ? `<span class="played">${esc(PLAYED)}</span>` : ''}${C.teeType ? `<span>${esc(C.teeType)} tees${C.rating ? ' · ' + esc(C.rating) : ''}</span>` : ''}<span>Round ${DATA.roundId}</span>`;
+function playerTotal(pi) { const s = sums(pi, C.holes.map((_, i) => i)); return s; }
+function renderHoleCard() {
+  const vis = shown();
+  if (state.all) {
+    $('h-label').textContent = 'Round';
+    $('h-num').textContent = 'All'; $('h-num').classList.add('word');
+    $('h-par').textContent = C.par;
+    $('h-yds').textContent = C.holes.reduce((a, h) => a + h.yards, 0).toLocaleString();
+    $('h-score-l').textContent = vis.length > 1 ? 'Totals' : 'Total';
+    $('h-score').innerHTML = vis.map(pi => `${vis.length > 1 ? pdot(pi) : ''}${playerTotal(pi).s}`).join('<span class="sep">·</span>');
+    $('h-result').innerHTML = vis.map(pi => { const s = playerTotal(pi); return `<span class="pill">${vis.length > 1 ? pdot(pi) : ''}${esc(PL[pi].name)} ${toPar(s.s - s.par)}${s.all ? '' : ` thru ${s.done}`}</span>`; }).join('') + `<span>${esc(C.location || '')}</span>`;
+  } else {
+    const ch = C.holes[state.hole];
+    $('h-label').textContent = 'Hole';
+    $('h-num').textContent = ch.n; $('h-num').classList.remove('word');
+    $('h-par').textContent = ch.par;
+    $('h-yds').textContent = ch.yards;
+    $('h-score-l').textContent = vis.length > 1 ? 'Scores' : 'Score';
+    // scores in scorecard notation (circle, square, doubled), each beside its player's color
+    $('h-score').innerHTML = `<span class="scores">${vis.map(pi => `<span class="ps" title="${esc(PL[pi].name)}">${vis.length > 1 ? pdot(pi) : ''}${notation(PL[pi].holes[state.hole], ch.par)}</span>`).join('')}</span>`;
+    $('h-result').innerHTML = vis.map(pi => {
+      const h = PL[pi].holes[state.hole];
+      const dot = vis.length > 1 ? pdot(pi) : '';
+      if (!h) return `<span class="note-item">${dot}no score</span>`;
+      const putts = h.items.filter(i => i.kind === 'putt' || (i.kind === 'shot' && i.putt)).length;
+      const extra = [h.complete ? '' : 'in play', putts ? `${putts} putt${putts > 1 ? 's' : ''}` : '', h.items.some(i => i.kind === 'penalty') ? 'penalty' : '', h.items.some(i => i.kind === 'mulligan') ? 'mulligan' : ''].filter(Boolean).join(' · ');
+      return extra ? `<span class="note-item">${dot}${extra}</span>` : '';
+    }).join('');
+  }
+  $('b-all').setAttribute('aria-pressed', String(state.all));
+  $('b-play').disabled = state.all;
+  renderScorecardState();
+}
+function metric(k, v) { return `<div><span class="k">${k}</span><span class="v">${v}</span></div>`; }
+function itemRow(pi, hi, it) {
+  const h = PL[pi].holes[hi], ch = C.holes[hi];
+  const open = state.selected && state.selected[0] === pi && state.selected[1] === hi && state.selected[2] === it.k;
+  const li = document.createElement('li');
+  const color = colorOf(it);
+  if (it.kind === 'putt') {
+    const putts = h.items.filter(i => i.kind === 'putt');
+    li.innerHTML = `<button class="row"><span class="badge ghost" style="--c:var(--ink-2)">${putts[0].stroke}${putts.length > 1 ? '+' : ''}</span><span class="what"><span class="club">${putts.length} putt${putts.length > 1 ? 's' : ''}</span><span class="lie">Auto-putt from ${Math.round(h.puttFromM * FT)} ft</span></span><span class="nums"><b>${putts.some(p => p.holed) ? 'Holed' : '—'}</b></span></button>`;
+  } else if (it.kind === 'penalty') {
+    li.innerHTML = `<button class="row" aria-expanded="${open}"><span class="badge ghost" style="--c:#E0442E">${it.stroke}</span><span class="what"><span class="club">${it.ob ? 'Out of bounds' : 'Penalty stroke'}</span><span class="lie">${it.ob ? 'Stroke and distance · hit again from the same spot' : `Drop in the ${esc(it.dropLie.toLowerCase())}`}</span></span><span class="nums"><b>${Math.round(it.toPinM * YD)}</b>yd to pin</span></button>`;
+  } else {
+    const mull = it.kind === 'mulligan';
+    const name = (it.putt ? 'Putt' : clubName(it.club)) + (it.stiff ? `<span class="stiff" title="${esc(it.stiff.why)}"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="6" cy="6" r="5"/><circle cx="6" cy="6" r="2.6"/><circle cx="6" cy="6" r="0.6" fill="currentColor"/></svg>${it.stiff.chip}</span>` : '') + (it.bomb ? `<span class="stiff bomb" title="Carried ${it.bomb.carry} yd"><svg viewBox="0 0 12 12" fill="currentColor"><path d="M6 0.6 7.1 4.2 10.8 2.9 8.4 5.9 11.4 8.1 7.6 7.9 6.6 11.4 5.2 8 1.4 9.6 3.8 6.4 0.6 4.1 4.5 4.5Z"/></svg>Bomb</span>` : '');
+    const lie = mull ? `Mulligan · replayed, not counted` : `${it.fromLie} → ${it.pen ? (it.ob ? 'Out of bounds' : 'Penalty area') : it.toLie}${it.pen ? '' : ' · ' + fmtPin(it.toPinM, it.toLie)}`;
+    const nums = it.putt
+      ? `<span><b>${Math.round(it.totalYd / YD * FT)}</b> ft</span><span>${it.holed && it.toPinM < 1.5 ? 'holed' : 'rolled'}</span>`
+      : it.pen ? `<span><b>${Math.round(it.carryYd)}</b> carry</span><span>penalty</span>`
+      : `<span><b>${Math.round(it.carryYd)}</b> carry</span><span><b>${Math.round(it.totalYd)}</b> total</span>`;
+    li.innerHTML = `<button class="row${mull ? ' mull' : ''}" aria-expanded="${open}"><span class="badge${mull ? ' ghost' : ''}" style="--c:${color}">${mull ? 'M' : it.stroke}</span><span class="what"><span class="club">${name}</span><span class="lie">${lie}</span></span><span class="nums">${nums}</span></button>`;
+    if (open && !it.putt) {
+      const d = document.createElement('div'); d.className = 'detail';
+      d.innerHTML = metric('Ball speed', `${it.mph.toFixed(1)} mph`) + metric('Launch', `${it.vla.toFixed(1)}°`) + metric('HLA', `${it.hla.toFixed(1)}°`) +
+        metric('Spin', `${it.spin.toLocaleString()} rpm`) + metric('Spin axis', `${it.axis.toFixed(1)}°`) + metric('Apex', `${it.apexFt} ft`) +
+        metric('Landed', esc(it.tdLie || '—')) + metric('Hang', `${it.flightT.toFixed(1)} s`) + metric('Club #', it.club);
+      li.appendChild(d);
+    }
+  }
+  const btn = li.querySelector('button');
+  const pc = it.kind === 'penalty' ? '#E0442E' : it.kind === 'shot' ? colorOf(it) : '#8A958E';
+  btn.style.setProperty('--pc', pc.toUpperCase() === '#FFFFFF' ? '#8A958E' : pc);
+  it.rowEl = btn;
+  btn.addEventListener('click', () => selectItem(pi, hi, it.k, true));
+  return li;
+}
+function renderList() {
+  const list = $('s-list'); list.innerHTML = '';
+  const vis = shown();
+  const fig = $('s-fig');
+  if (state.all) {
+    fig.hidden = true;
+    $('s-title').textContent = C.name;
+    $('s-sub').textContent = [C.location, `par ${C.par}`, C.teeType && `${C.teeType} tees`].filter(Boolean).join(' · ');
+    C.holes.forEach((ch, hi) => {
+      const li = document.createElement('li');
+      const scores = vis.map(pi => { const h = PL[pi].holes[hi]; return h ? `<span>${vis.length > 1 ? pdot(pi) : ''}<b>${h.strokes}</b> ${h.complete ? toPar(h.strokes - ch.par) : 'so far'}</span>` : '<span>–</span>'; }).join('');
+      li.innerHTML = `<button class="row"><span class="badge ghost" style="--c:var(--line)">${ch.n}</span><span class="what"><span class="club">Par ${ch.par} · ${ch.yards} yds</span><span class="lie">${ch.index ? 'Stroke index ' + ch.index : ''}</span></span><span class="nums">${scores}</span></button>`;
+      li.querySelector('button').addEventListener('click', () => goHole(hi));
+      list.appendChild(li);
+    });
+    return;
+  }
+  const ch = C.holes[state.hole];
+  $('s-title').textContent = `Hole ${ch.n}`;
+  $('s-sub').textContent = `Par ${ch.par} · ${ch.yards} yds${ch.index ? ' · index ' + ch.index : ''} · tap a shot to replay it`;
+  const img = DATA.images[String(ch.n)];
+  fig.hidden = !img;
+  if (img) { $('s-img').src = img; $('s-img').alt = `GSPro tee view of hole ${ch.n}`; $('s-cap').textContent = 'In-game tee view'; }
+  for (const pi of vis) {
+    const h = PL[pi].holes[state.hole];
+    if (vis.length > 1) {
+      const g = document.createElement('li'); g.className = 'grp';
+      g.innerHTML = `${pdot(pi)}<span>${esc(PL[pi].name)}</span><span class="gs">${h ? `${h.strokes} · ${h.complete ? scoreName(h.strokes - ch.par) : 'in play'}` : 'no score'}</span>`;
+      list.appendChild(g);
+    }
+    if (!h) continue;
+    let puttShown = false;
+    h.items.forEach(it => {
+      if (it.kind === 'putt') { if (puttShown) return; puttShown = true; }
+      list.appendChild(itemRow(pi, state.hole, it));
+    });
+  }
+  if (anim) markPlaying(anim.queue[anim.i]);
+}
+
+// ---------------------------------------------------------------- actions
+function revealAll(it) { if (!it.lines) return; for (const l of Object.values(it.lines)) { l.geometry.instanceCount = Infinity; l.visible = true; } const on = !state.all; if (it.restObj) it.restObj.visible = on; if (it.landObj) it.landObj.visible = on; }
+function hideForPlay(it) { if (!it.lines) return; for (const l of Object.values(it.lines)) l.visible = false; if (it.restObj) it.restObj.visible = false; if (it.landObj) it.landObj.visible = false; }
+function stopAnim() { afterReplay = null; if (!anim) return; anim.queue.forEach(revealAll); anim = null; ball.visible = false; setPlayLabel(); markPlaying(null); }
+// mode 'hole' replays a whole hole from the hole view; 'shot' replays one shot from its own view
+function play(queue, mode = 'hole') {
+  stopAnim();
+  queue.forEach(hideForPlay);
+  const now = performance.now();
+  anim = { queue, mode, i: 0, t: 0, last: now, holdUntil: now + 250, started: -1, auto: true, cam: 'base' };
+  ball.visible = true; setPlayLabel();
+}
+function markPlaying(it) {
+  document.querySelectorAll('#s-list .row.playing').forEach(r => r.classList.remove('playing'));
+  if (!it || !it.rowEl || !it.rowEl.isConnected) return;
+  it.rowEl.classList.add('playing');
+  const list = $('s-list'), r = it.rowEl.getBoundingClientRect(), L = list.getBoundingClientRect();
+  if (r.top < L.top + 4 || r.bottom > L.bottom - 4) list.scrollBy({ top: r.top - L.top - (L.height - r.height) / 2, behavior: reduceMotion ? 'auto' : 'smooth' });
+}
+function setPlayLabel() { $('b-play').querySelector('span').textContent = anim && anim.mode !== 'reel' ? 'Stop' : 'Replay hole'; }
+function refresh() { setVisibility(); recolor(); dimOthers(); renderHoleCard(); renderList(); updateViewOffset(); }
+function goHole(hi, { fly = true } = {}) {
+  userTakesOver();
+  stopAnim(); closeTeeView(false); clearFx();
+  state.all = false; state.hole = Math.max(0, Math.min(NH - 1, hi)); state.selected = null;
+  refresh();
+  if (fly) flyTo(holeView(state.hole));
+}
+function goAll() { userTakesOver(); stopAnim(); closeTeeView(false); clearFx(); state.all = true; state.selected = null; refresh(); flyTo(overviewView(), 1200); }
+function setWho(v) {
+  userTakesOver();
+  stopAnim();
+  state.who = v; state.selected = null;
+  refresh();
+  flyTo(state.all ? overviewView() : holeView(state.hole), 700);
+}
+function selectItem(pi, hi, k, replay) {
+  userTakesOver();
+  const it = PL[pi].holes[hi].items[k];
+  if (state.all || hi !== state.hole) goHole(hi, { fly: false });
+  if (!shown().includes(pi)) { state.who = pi; refresh(); }
+  const same = state.selected && state.selected[0] === pi && state.selected[1] === hi && state.selected[2] === k;
+  state.selected = same ? null : [pi, hi, k];
+  dimOthers(); renderList();
+  if (!state.selected) { stopAnim(); flyTo(holeView(hi)); return; }
+  if (it.kind === 'shot' || it.kind === 'mulligan') { flyTo(shotView(hi, it)); if (replay) play([it], 'shot'); }
+  else { stopAnim(); flyTo(holeView(hi)); }
+}
+// ---------------------------------------------------------------- tee view: click to enlarge, click again to shrink back
+const lb = $('lb'), lbImg = $('lb-img'), thumb = $('s-fig');
+const flip = (a, b) => `translate(${a.left - b.left}px, ${a.top - b.top}px) scale(${a.width / b.width}, ${a.height / b.height})`;
+function openTeeView() {
+  const small = $('s-img');
+  if (thumb.hidden || !small.src) return;
+  lbImg.src = small.src; lbImg.alt = small.alt;
+  if (small.naturalWidth) { lbImg.width = small.naturalWidth; lbImg.height = small.naturalHeight; }
+  $('lb-cap').textContent = `Hole ${C.holes[state.hole].n} · in-game tee view · click to close`;
+  lb.hidden = false; thumb.setAttribute('aria-expanded', 'true');
+  if (reduceMotion) { lb.classList.add('open'); return; }
+  // grow out of the thumbnail: start at its box, then animate to full size
+  lbImg.style.transition = 'none'; lbImg.style.transformOrigin = '0 0';
+  lbImg.style.transform = flip(small.getBoundingClientRect(), lbImg.getBoundingClientRect());
+  lbImg.getBoundingClientRect();
+  requestAnimationFrame(() => { lbImg.style.transition = 'transform 0.38s cubic-bezier(0.2, 0.8, 0.2, 1)'; lbImg.style.transform = 'none'; lb.classList.add('open'); });
+}
+function closeTeeView(animate = true) {
+  if (lb.hidden) return;
+  thumb.setAttribute('aria-expanded', 'false');
+  lb.classList.remove('open');
+  let finished = false;
+  const done = () => { if (finished) return; finished = true; lb.hidden = true; lbImg.style.transition = 'none'; lbImg.style.transform = ''; };
+  if (!animate || reduceMotion || thumb.hidden) { done(); return; }
+  lbImg.style.transition = 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+  lbImg.style.transform = flip($('s-img').getBoundingClientRect(), lbImg.getBoundingClientRect());
+  lbImg.addEventListener('transitionend', done, { once: true });
+  setTimeout(done, 450);
+}
+thumb.addEventListener('click', () => (lb.hidden ? openTeeView() : closeTeeView()));
+lb.addEventListener('click', () => closeTeeView());
+// the course wraps: back from 1 goes to 18, on from 18 goes to 1
+$('b-prev').addEventListener('click', () => (state.all ? goHole(NH - 1) : goHole((state.hole - 1 + NH) % NH)));
+$('b-next').addEventListener('click', () => (state.all ? goHole(0) : goHole((state.hole + 1) % NH)));
+$('b-all').addEventListener('click', () => (state.all ? goHole(state.hole) : goAll()));
+$('b-play').addEventListener('click', () => {
+  userTakesOver();
+  if (anim) { stopAnim(); return; }
+  if (state.all) return;
+  state.selected = null; dimOthers(); renderList();
+  // play order across players comes from GSPro's global shot number
+  const q = [];
+  for (const pi of shown()) { const h = PL[pi].holes[state.hole]; if (h) q.push(...h.items.filter(i => i.lines)); }
+  q.sort((a, b) => a.gsn - b.gsn || a.stroke - b.stroke);
+  play(q, 'hole');
+});
+addEventListener('keydown', e => {
+  if (e.target.closest && e.target.closest('input, textarea')) return;
+  if (e.key === 'Escape' && !lb.hidden) { closeTeeView(); return; }
+  if (e.key === 'ArrowRight') { e.preventDefault(); $('b-next').click(); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); $('b-prev').click(); }
+  else if (e.key === 'a' || e.key === 'A') $('b-all').click();
+  else if ((e.key === 'p' || e.key === 'P') && PL.length > 1) { const opts = [...PL.map((_, i) => i), 'both']; setWho(opts[(opts.indexOf(state.who) + 1) % opts.length]); }
+  else if (e.key === ' ' && e.target === document.body) { e.preventDefault(); $('b-play').click(); }
+  else if (/^[1-4]$/.test(e.key) && !e.metaKey && !e.ctrlKey && !e.altKey) previewScore(+e.key);
+  else if ((e.key === 'h' || e.key === 'H') && !e.metaKey && !e.ctrlKey && !e.altKey) reelBtn.click();
+  else if (e.key === 'Escape' && reel) endReel(false);
+  else if (e.key === 'Escape' && state.selected) { const [pi, hi, k] = state.selected; selectItem(pi, hi, k, false); }
+});
+
+// ---------------------------------------------------------------- theme
+function isDark() { const t = document.documentElement.getAttribute('data-theme'); return t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches); }
+function applyTheme() {
+  scene.fog.color.set(getComputedStyle(document.documentElement).getPropertyValue('--fog').trim() || '#D6E2DC');
+  const dark = isDark();
+  hemi.color.set(dark ? '#7F9CC4' : '#E2EFFF'); hemi.groundColor.set(dark ? '#1C241E' : '#5A4A33'); hemi.intensity = dark ? 0.62 : 1.05;
+  sun.color.set(dark ? '#C9D6FF' : '#FFF0D8'); sun.intensity = dark ? 0.62 : 1.75;
+  seaMat.color.set(dark ? '#24627E' : '#3A93B8'); seaSide.color.set(dark ? '#1A4A60' : '#2C6F8E');
+}
+// a light/dark switch on the hole card; the choice is remembered in this browser
+const themeBtn = $('b-theme');
+function updateThemeBtn() { const d = isDark(); themeBtn.classList.toggle('dark', d); themeBtn.setAttribute('aria-label', d ? 'Switch to light mode' : 'Switch to dark mode'); }
+try { const saved = localStorage.getItem('gspro-viewer-theme'); if (saved === 'light' || saved === 'dark') document.documentElement.setAttribute('data-theme', saved); } catch (e) { /* storage unavailable: follow the system */ }
+themeBtn.addEventListener('click', () => {
+  const next = isDark() ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('gspro-viewer-theme', next); } catch (e) { /* not remembered, still switched */ }
+});
+new MutationObserver(updateThemeBtn).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', updateThemeBtn);
+updateThemeBtn();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
+new MutationObserver(applyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+applyTheme();
+
+// ---------------------------------------------------------------- loop
+// ---------------------------------------------------------------- celebrations
+// holed from anywhere off the green: the big one. From 50+ yards to inside 10 feet: stuck it (kick-in inside 3 feet).
+function stiffness(it, start) {
+  if (it.kind !== 'shot' || it.pen) return null;
+  const pin = C.holes[it.h].pinV, fromM = horiz(start, pin);
+  if (it.holed && it.toPinM < 0.5 && it.fromLie !== 'Green') {
+    const dist = fromM * YD < 20 ? `${Math.round(fromM * FT)} ft` : `${Math.round(fromM * YD)} yd`;
+    return { big: true, label: `Holed out! · ${dist}`, chip: 'Holed out', why: `Holed out from ${dist}${it.fromLie ? ' in the ' + it.fromLie.toLowerCase() : ''}` };
+  }
+  if (it.putt || fromM <= STIFF_FROM || it.toPinM > STIFF_IN) return null;
+  const yd = Math.round(fromM * YD), ft = Math.max(1, Math.round(it.toPinM * FT));
+  const word = it.toPinM * FT <= 3 ? 'Kick-in' : 'Stuck it';
+  return { big: false, label: `${word} · ${ft} ft`, chip: `${ft} ft`, why: `${word}: ${yd} yd to ${ft} ft` };
+}
+const fx = [];
+const sparkTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'), r = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  r.addColorStop(0, 'rgba(255,255,255,1)'); r.addColorStop(0.35, 'rgba(255,255,255,0.9)'); r.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = r; g.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+})();
+const easeOutBack = x => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+function stepFx(now) { for (let i = fx.length - 1; i >= 0; i--) if (!fx[i].update(now)) { fx[i].dispose(); fx.splice(i, 1); } }
+function clearFx() { while (fx.length) fx.pop().dispose(); shake = null; }
+let shake = null;
+function shakeOffset(now) {
+  if (!shake) return null;
+  const k = ((now - shake.t0) * FX_TIME) / shake.dur;
+  if (k >= 1) { shake = null; return null; }
+  const a = shake.amp * (1 - k) * (1 - k);
+  return new THREE.Vector3((Math.random() - 0.5) * a, (Math.random() - 0.5) * a, (Math.random() - 0.5) * a);
+}
+function disposeGroup(g) { scene.remove(g); g.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); }
+
+// a target painted on the green: grows out from the cup until the ball sits inside it, pulses once, fades
+function targetFx(center, reach, color, now) {
+  const group = new THREE.Group(); group.position.copy(center); group.position.y += 0.15; scene.add(group);
+  const bands = [['#FFD23F', 0, 0.25], [color, 0.25, 0.5], ['#FFFFFF', 0.5, 0.75], [color, 0.75, 1]];
+  const mk = (geo, c, order) => {
+    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0, depthWrite: false, depthTest: false, side: THREE.DoubleSide }));
+    m.rotation.x = -Math.PI / 2; m.renderOrder = order; group.add(m); return m;
+  };
+  const rings = bands.map(([c, a, b]) => mk(a === 0 ? new THREE.CircleGeometry(b, 48) : new THREE.RingGeometry(a, b, 48), c, 7));
+  const shock = mk(new THREE.RingGeometry(0.95, 1, 64), '#FFFFFF', 8);
+  // a small tag on the outer ring, on the side facing the camera's right, saying how big the circle is
+  const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).setY(0).normalize();
+  const tagEl = css('anchor', `<span class="ring-tag">${Math.round(reach * FT)} ft</span>`);
+  const tag = label(tagEl, center.clone().addScaledVector(right, reach).setY(center.y + 0.2)); tag.visible = false;
+  const t0 = now;
+  return {
+    update(now) {
+      const t = ((now - t0) / 1000) * FX_TIME;
+      group.scale.setScalar(Math.max(0.001, reach * easeOutBack(Math.min(1, t / 0.55))));
+      const a = Math.min(1, t / 0.12) * (t < 1.7 ? 1 : Math.max(0, 1 - (t - 1.7) / 0.6));
+      rings.forEach(m => (m.material.opacity = 0.85 * a));
+      const st = t - 0.5;
+      shock.scale.setScalar(1 + Math.max(0, st) * 1.8);
+      shock.material.opacity = st > 0 && st < 0.9 ? 0.9 * (1 - st / 0.9) : 0;
+      tag.visible = t > 0.45 && t < 2.1;
+      return t < 2.4;
+    },
+    dispose() { disposeGroup(group); scene.remove(tag); tagEl.remove(); },
+  };
+}
+// a small firework: a spark climbs from the ball, then bursts in the shot's color, gold and white
+function fireworkFx(origin, color, now, delay = 0, scale = 1) {
+  const dist = camera.position.distanceTo(origin);
+  const H = THREE.MathUtils.clamp(dist * 0.17, 6, 45) * scale, N = Math.round(120 * scale), TRAIL = 10, rise = 0.55;
+  const pos = new Float32Array((N + TRAIL) * 3).fill(-1e5), col = new Float32Array((N + TRAIL) * 3);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const mat = new THREE.PointsMaterial({ size: 8, sizeAttenuation: false, map: sparkTex, vertexColors: true, transparent: true, depthWrite: false });
+  const pts = new THREE.Points(geo, mat); pts.frustumCulled = false; pts.renderOrder = 9; scene.add(pts);
+  const pal = [new THREE.Color(color), new THREE.Color('#FFD23F'), new THREE.Color('#FFFFFF')];
+  const vel = [];
+  for (let i = 0; i < N; i++) {
+    const u = Math.random() * 2 - 1, a = Math.random() * Math.PI * 2, r = Math.sqrt(1 - u * u), sp = H * (0.55 + Math.random() * 0.45);
+    vel.push([r * Math.cos(a) * sp, u * sp * 0.8 + H * 0.12, r * Math.sin(a) * sp]);
+    const c = pal[i % 3]; col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+  }
+  for (let k = 0; k < TRAIL; k++) { col[(N + k) * 3] = 1; col[(N + k) * 3 + 1] = 0.9 - k * 0.04; col[(N + k) * 3 + 2] = 0.55 - k * 0.04; }
+  const t0 = now + delay * 1000, top = origin.clone().setY(origin.y + H);
+  return {
+    update(now) {
+      const t = ((now - t0) / 1000) * FX_TIME;
+      if (t < 0) return true;
+      if (t < rise) {
+        const e = 1 - Math.pow(1 - t / rise, 2);
+        for (let k = 0; k < TRAIL; k++) { const f = Math.max(0, e - k * 0.035); pos[(N + k) * 3] = origin.x; pos[(N + k) * 3 + 1] = origin.y + H * f; pos[(N + k) * 3 + 2] = origin.z; }
+      } else {
+        const tb = t - rise, s = (1 - Math.exp(-1.8 * tb)) / 1.8, g = -H * 1.1;
+        for (let i = 0; i < N; i++) { const v = vel[i]; pos[i * 3] = top.x + v[0] * s; pos[i * 3 + 1] = top.y + v[1] * s + 0.5 * g * tb * tb; pos[i * 3 + 2] = top.z + v[2] * s; }
+        for (let k = 0; k < TRAIL; k++) pos[(N + k) * 3 + 1] = -1e5;
+        mat.opacity = Math.max(0, 1 - tb / 1.4);
+      }
+      geo.attributes.position.needsUpdate = true;
+      return t < rise + 1.45;
+    },
+    dispose() { scene.remove(pts); geo.dispose(); mat.dispose(); },
+  };
+}
+function cheerFx(at, info, color, now) {
+  const el = css('anchor', `<span class="cheer${info.big ? ' big' : ''}${info.hot ? ' hot' : ''}${info.cls ? ' ' + info.cls : ''}" style="--c:${color}">${esc(info.label)}</span>`);
+  const o = label(el, at), t0 = now;
+  return { update(now) { return (now - t0) * FX_TIME < 2700; }, dispose() { scene.remove(o); el.remove(); } };
+}
+function celebrate(it, now, info = it.stiff) {
+  if (!info) return false;
+  const color = colorOf(it), pin = C.holes[it.h].pinV, ball = onGround(v3(it.end), 0.1);
+  if (!info.noLabel) fx.push(cheerFx(ball.clone().setY(ball.y + 0.5), info, color, now));
+  if (reduceMotion) return true;
+  fx.push(targetFx(onGround(pin, 0), STIFF_IN, color, now));
+  fx.push(fireworkFx(ball, color, now, 0.15, info.big ? 1.25 : 1));
+  if (info.big) fx.push(fireworkFx(ball.clone().setX(ball.x + 1.5), '#FFD23F', now, 0.55, 1));
+  return true;
+}
+
+// ---------------------------------------------------------------- a bomb off the tee
+function flashFx(at, now) {
+  const size = camera.position.distanceTo(at) * 0.07;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: sparkTex, color: '#FFF1BF', transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending }));
+  sp.position.copy(at).setY(at.y + size * 0.15); sp.renderOrder = 10; scene.add(sp);
+  const t0 = now;
+  return {
+    update(now) { const t = ((now - t0) / 1000) * FX_TIME, k = Math.min(1, t / 0.32); sp.scale.setScalar(size * (0.4 + 1.6 * Math.sqrt(k))); sp.material.opacity = 1 - k; return k < 1; },
+    dispose() { scene.remove(sp); sp.material.dispose(); },
+  };
+}
+function shockFx(at, now, delay, color = delay ? '#FF9A45' : '#FFFFFF', reach = 0.13) {
+  const R = camera.position.distanceTo(at) * reach;
+  const m = new THREE.Mesh(new THREE.RingGeometry(0.86, 1, 64), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0, depthWrite: false, depthTest: false, side: THREE.DoubleSide }));
+  m.rotation.x = -Math.PI / 2; m.position.copy(at).setY(at.y + 0.2); m.renderOrder = 9; scene.add(m);
+  const t0 = now + delay * 1000;
+  return {
+    update(now) {
+      const t = ((now - t0) / 1000) * FX_TIME; if (t < 0) return true;
+      const k = Math.min(1, t / 0.6), e = 1 - Math.pow(1 - k, 3);
+      m.scale.setScalar(Math.max(0.01, R * e)); m.material.opacity = 0.95 * (1 - k); return k < 1;
+    },
+    dispose() { scene.remove(m); m.geometry.dispose(); m.material.dispose(); },
+  };
+}
+function debrisFx(at, dir, now) {
+  // turf and sparks kicked up and out toward the target
+  const dist = camera.position.distanceTo(at), N = 80, sp = dist * 0.11;
+  const pos = new Float32Array(N * 3), col = new Float32Array(N * 3), vel = [];
+  const pal = ['#8FD45A', '#5E9E3A', '#FFFFFF', '#FFB13D', '#FF6A2B'].map(c => new THREE.Color(c));
+  const side = new THREE.Vector3(-dir.z, 0, dir.x);
+  for (let i = 0; i < N; i++) {
+    const fwd = Math.random() < 0.6;
+    const v = fwd ? dir.clone().multiplyScalar(0.6 + Math.random() * 0.8).addScaledVector(side, (Math.random() - 0.5) * 0.9)
+                  : new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize().multiplyScalar(0.4 + Math.random() * 0.6);
+    v.y = 0.5 + Math.random() * 1.1; v.multiplyScalar(sp);
+    vel.push(v); const c = pal[i % pal.length]; col.set([c.r, c.g, c.b], i * 3);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const mat = new THREE.PointsMaterial({ size: 7, sizeAttenuation: false, map: sparkTex, vertexColors: true, transparent: true, depthWrite: false });
+  const pts = new THREE.Points(geo, mat); pts.frustumCulled = false; pts.renderOrder = 9; scene.add(pts);
+  const t0 = now, g = -sp * 2.2;
+  return {
+    update(now) {
+      const t = ((now - t0) / 1000) * FX_TIME;
+      for (let i = 0; i < N; i++) { const v = vel[i]; pos[i * 3] = at.x + v.x * t; pos[i * 3 + 1] = at.y + 0.3 + v.y * t + 0.5 * g * t * t; pos[i * 3 + 2] = at.z + v.z * t; }
+      geo.attributes.position.needsUpdate = true; mat.opacity = Math.max(0, 1 - t / 1.1); return t < 1.1;
+    },
+    dispose() { scene.remove(pts); geo.dispose(); mat.dispose(); },
+  };
+}
+// sparks shed behind anything that moves: getPos fills a vector, isOn says whether to keep shedding
+function sparkTrail(getPos, isOn, palette, now, o = {}) {
+  const N = o.n || 160, LIFE = o.life || 0.6, RATE = o.rate || 4, add = o.additive !== false;
+  const pos = new Float32Array(N * 3).fill(-1e5), col = new Float32Array(N * 4), life = new Float32Array(N), vel = new Float32Array(N * 3);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.BufferAttribute(col, 4));
+  const mat = new THREE.PointsMaterial({ size: o.size || 6, sizeAttenuation: false, map: sparkTex, vertexColors: true, transparent: true, depthWrite: false, blending: add ? THREE.AdditiveBlending : THREE.NormalBlending });
+  const pts = new THREE.Points(geo, mat); pts.frustumCulled = false; pts.renderOrder = 9; scene.add(pts);
+  const pal = palette.map(c => new THREE.Color(c)), at = new THREE.Vector3(), t0 = now;
+  let next = 0, last = now, seen = false;
+  return {
+    update(now) {
+      const dt = Math.min(0.1, ((now - last) / 1000) * FX_TIME); last = now;
+      const on = isOn(); if (on) seen = true;
+      if (on) {
+        getPos(at);
+        const jitter = camera.position.distanceTo(at) * (o.jitter ?? 0.004);
+        for (let n = 0; n < RATE; n++) {
+          const i = next++ % N; life[i] = LIFE;
+          pos[i * 3] = at.x; pos[i * 3 + 1] = at.y; pos[i * 3 + 2] = at.z;
+          vel[i * 3] = (Math.random() - 0.5) * jitter; vel[i * 3 + 1] = (Math.random() - 0.3) * jitter; vel[i * 3 + 2] = (Math.random() - 0.5) * jitter;
+        }
+      }
+      let alive = 0;
+      for (let i = 0; i < N; i++) {
+        if (life[i] <= 0) { pos[i * 3 + 1] = -1e5; continue; }
+        life[i] -= dt; alive++;
+        // lives are float32, so a fresh one can read a hair over LIFE: clamp before picking a color
+        const k = Math.min(1, Math.max(0, life[i] / LIFE)), c = pal[Math.min(pal.length - 1, Math.max(0, Math.floor((1 - k) * pal.length)))], m = add ? k : 1;
+        col[i * 4] = c.r * m; col[i * 4 + 1] = c.g * m; col[i * 4 + 2] = c.b * m; col[i * 4 + 3] = k;
+        pos[i * 3] += vel[i * 3] * dt * 10; pos[i * 3 + 1] += vel[i * 3 + 1] * dt * 10; pos[i * 3 + 2] += vel[i * 3 + 2] * dt * 10;
+      }
+      geo.attributes.position.needsUpdate = true; geo.attributes.color.needsUpdate = true;
+      return on || alive > 0 || (!seen && ((now - t0) / 1000) * FX_TIME < (o.wait ?? 3));
+    },
+    dispose() { scene.remove(pts); geo.dispose(); mat.dispose(); },
+  };
+}
+// embers shed by the ball for as long as a bomb drive is in the air
+function trailFx(it, now) {
+  return sparkTrail(v => v.copy(ball.position), () => !!anim && anim.queue[anim.i] === it && anim.t < it.flightT, ['#FFE08A', '#FF9A3D', '#FF5B2B'], now, { wait: 0 });
+}
+function launchBomb(it, now) {
+  const tee = onGround(v3(it.start), 0.1);
+  const dir = new THREE.Vector3().subVectors(v3(it.td), v3(it.start)).setY(0).normalize();
+  fx.push(cheerFx(tee.clone().setY(tee.y + 2), { big: true, hot: true, label: `Bomb · ${it.bomb.carry} carry` }, '#FF5B2B', now));
+  if (reduceMotion) return;
+  fx.push(flashFx(tee, now), shockFx(tee, now, 0), shockFx(tee, now, 0.12), debrisFx(tee, dir, now), trailFx(it, now));
+  shake = { t0: now, dur: 420, amp: camera.position.distanceTo(tee) * 0.006 };
+}
+
+// ---------------------------------------------------------------- birdies and better: something flies out of the cup
+function scoreKind(strokes, par) {
+  const d = strokes - par;
+  if (strokes === 1) return { kind: 'ace', name: 'Hole in one' };
+  if (d === -1) return { kind: 'birdie', name: 'Birdie' };
+  if (d === -2) return { kind: 'eagle', name: 'Eagle' };
+  return { kind: 'albatross', name: d === -3 ? 'Albatross' : 'Condor' };
+}
+// how long the replay waits on each before moving on (ms)
+const SCORE_HOLD = { birdie: 3200, eagle: 5200, albatross: 6800, ace: 8200 };
+// low-poly birds; a null color takes the player's color
+const BIRDS = {
+  birdie: { body: null, belly: '#FFF1D6', wing: null, tip: '#26323C', head: null, beak: '#F6C343', tail: null, span: 0.85, chord: 1, len: 0.9, beakLen: 0.32 },
+  eagle: { body: '#5B3920', belly: '#4A2E19', wing: '#4F321C', tip: '#2B1A0E', head: '#F7F4EC', beak: '#F2B705', tail: '#F7F4EC', span: 1.5, chord: 1.2, len: 1.15, beakLen: 0.46, fingers: true },
+  albatross: { body: '#F7F6F1', belly: '#FFFFFF', wing: '#3A3F46', tip: '#1E2126', head: '#F7F6F1', beak: '#F1C27D', tail: '#3A3F46', span: 2.7, chord: 0.62, len: 1.1, beakLen: 0.56 },
+};
+const smooth01 = x => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); };
+const easeOut = x => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
+
+function makeBird(kind, accent) {
+  const k = BIRDS[kind], g = new THREE.Group(), mats = [];
+  const shade = f => '#' + new THREE.Color(accent).multiplyScalar(f).getHexString();
+  const pick = (c, f = 1) => c || shade(f);
+  const mat = c => { const m = new THREE.MeshStandardMaterial({ color: c, flatShading: true, roughness: 0.75, metalness: 0, side: THREE.DoubleSide, transparent: true }); mats.push(m); return m; };
+  const add = (geo, c, parent = g, x = 0, y = 0, z = 0) => { const m = new THREE.Mesh(geo, mat(c)); m.position.set(x, y, z); parent.add(m); return m; };
+  const tris = pts => { const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pts.flat(), 3)); geo.computeVertexNormals(); return geo; };
+  const L = k.len, c = k.chord;
+  add(new THREE.IcosahedronGeometry(1, 0), pick(k.body)).scale.set(0.46, 0.42, L);
+  add(new THREE.IcosahedronGeometry(0.75, 0), k.belly, g, 0, -0.14, 0.12).scale.set(0.55, 0.42, 0.85 * L);
+  add(new THREE.IcosahedronGeometry(0.4, 0), pick(k.head), g, 0, 0.3, 0.92 * L);
+  add(new THREE.ConeGeometry(0.13, k.beakLen, 4), k.beak, g, 0, 0.26, 0.92 * L + 0.24 + k.beakLen / 2).rotation.x = Math.PI / 2;
+  for (const s of [-1, 1]) add(new THREE.IcosahedronGeometry(0.08, 0), '#101418', g, s * 0.27, 0.38, 0.92 * L + 0.22);
+  add(tris([[0, 0.06, -0.7 * L], [-0.45, 0, -1.55 * L], [0.45, 0, -1.55 * L]]), pick(k.tail, 0.75));
+  const wings = [], tips = [];
+  for (const s of [1, -1]) {
+    const W1 = 0.95 * k.span, W2 = 1.05 * k.span;
+    const root = new THREE.Group(); root.position.set(s * 0.3, 0.16, 0.12); g.add(root);
+    add(tris([[0, 0, 0.4 * c], [0, 0, -0.42 * c], [s * W1, 0, 0.32 * c], [0, 0, -0.42 * c], [s * W1, 0, -0.38 * c], [s * W1, 0, 0.32 * c]]), pick(k.wing, 0.78), root);
+    const outer = new THREE.Group(); outer.position.x = s * W1; root.add(outer);
+    add(tris([[0, 0, 0.32 * c], [0, 0, -0.38 * c], [s * W2, 0, -0.55 * c]]), k.tip, outer);
+    // an eagle's spread primaries
+    if (k.fingers) for (let f = 0; f < 4; f++) add(tris([[s * W2 * 0.55, 0, (0.18 - f * 0.17) * c], [s * W2 * 0.55, 0, (0.06 - f * 0.17) * c], [s * (W2 + 0.45), 0, (0.02 - f * 0.24) * c]]), k.tip, outer);
+    const tip = new THREE.Object3D(); tip.position.set(s * W2, 0, -0.5 * c); outer.add(tip); tips.push(tip);
+    wings.push({ s, root, outer });
+  }
+  return {
+    group: g, tips,
+    pose(a, b) { for (const w of wings) { w.root.rotation.z = w.s * a; w.outer.rotation.z = w.s * b; } },
+    fade(o) { for (const m of mats) m.opacity = o; },
+    dispose() { disposeGroup(g); },
+  };
+}
+const flap = (hz, amp, bias = 0.05) => t => { const ph = t * hz * Math.PI * 2; return [bias + amp * Math.sin(ph), bias * 0.5 + amp * 0.75 * Math.sin(ph - 0.9)]; };
+// fly a bird along path(t) for T seconds, facing where it is going and banking into turns
+function birdFx(bird, S, T, path, wings, now, o = {}) {
+  const t0 = now + (o.delay || 0) * 1000, p = new THREE.Vector3(), a = new THREE.Vector3(), b = new THREE.Vector3(), d = 0.04;
+  bird.group.visible = false; scene.add(bird.group);
+  return {
+    t: -1,
+    update(now) {
+      const t = (this.t = ((now - t0) / 1000) * FX_TIME);
+      if (t < 0) return true;
+      if (t > T) { bird.group.visible = false; return false; }
+      path(t, p); path(t + d, b); path(Math.max(0, t - d), a);
+      bird.group.visible = true; bird.group.position.copy(p);
+      const v1x = p.x - a.x, v1z = p.z - a.z, v2x = b.x - p.x, v2z = b.z - p.z, n = Math.hypot(v1x, v1z) * Math.hypot(v2x, v2z);
+      const turn = n > 1e-9 ? (v1z * v2x - v1x * v2z) / n / d : 0;
+      if (b.distanceToSquared(p) > 1e-10) bird.group.lookAt(b);
+      bird.group.rotateZ(THREE.MathUtils.clamp(-turn * (o.bank ?? 0.3), -1.1, 1.1));
+      const [w1, w2] = wings(t); bird.pose(w1, w2);
+      bird.group.scale.setScalar(S * Math.max(0.01, easeOutBack(Math.min(1, t / (o.grow || 0.3)))));
+      bird.fade(Math.min(1, (T - t) / 0.5));
+      bird.group.updateMatrixWorld(true);
+      return true;
+    },
+    dispose() { bird.dispose(); },
+  };
+}
+// a few feathers puffed out of the cup
+function puffFx(at, colors, now, u) {
+  const N = 26, pos = new Float32Array(N * 3), col = new Float32Array(N * 4), vel = [];
+  const pal = colors.map(c => new THREE.Color(c));
+  for (let i = 0; i < N; i++) {
+    const a = Math.random() * Math.PI * 2, sp = u * (1.2 + Math.random() * 2);
+    vel.push([Math.cos(a) * sp, u * (2 + Math.random() * 2.5), Math.sin(a) * sp, Math.random() * 6]);
+    const c = pal[i % pal.length]; col.set([c.r, c.g, c.b, 1], i * 4);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.BufferAttribute(col, 4));
+  const mat = new THREE.PointsMaterial({ size: 5, sizeAttenuation: false, vertexColors: true, transparent: true, depthWrite: false });
+  const pts = new THREE.Points(geo, mat); pts.frustumCulled = false; pts.renderOrder = 9; scene.add(pts);
+  const t0 = now;
+  return {
+    update(now) {
+      const t = ((now - t0) / 1000) * FX_TIME, s = 1 - Math.exp(-2.5 * t);
+      for (let i = 0; i < N; i++) {
+        const v = vel[i];
+        pos[i * 3] = at.x + (v[0] * s) / 2.5 + Math.sin(t * 5 + v[3]) * u * 0.3;
+        pos[i * 3 + 1] = Math.max(at.y + 0.05, at.y + (v[1] * s) / 2.5 - u * 0.9 * t);
+        pos[i * 3 + 2] = at.z + (v[2] * s) / 2.5 + Math.cos(t * 4 + v[3]) * u * 0.3;
+        col[i * 4 + 3] = Math.max(0, 1 - t / 1.8);
+      }
+      geo.attributes.position.needsUpdate = true; geo.attributes.color.needsUpdate = true;
+      return t < 1.8;
+    },
+    dispose() { scene.remove(pts); geo.dispose(); mat.dispose(); },
+  };
+}
+const birdScale = (P, f) => THREE.MathUtils.clamp(camera.position.distanceTo(P) * f, 0.2, 8);
+const awayFrom = P => new THREE.Vector3(P.x - camera.position.x, 0, P.z - camera.position.z).normalize();
+
+// birdie: a little bird in the player's color hops out and spirals up around the flag
+function birdieFx(P, color, now) {
+  const u = birdScale(P, 0.016), away = awayFrom(P), dir = Math.random() < 0.5 ? 1 : -1, th0 = Math.atan2(-away.z, -away.x);
+  const path = (t, out) => {
+    const e = Math.min(1, t / 0.45), late = Math.max(0, t - 0.45), leave = Math.pow(Math.max(0, t - 1.9), 2) * 9 * u;
+    const r = u * (0.3 + 2.6 * e + late * 1.6), th = th0 + dir * t * 2.6;
+    const h = u * (0.3 + 2.2 * easeOut(e) + Math.pow(late, 1.5) * 2.6) + leave * 0.45;
+    out.set(P.x + Math.cos(th) * r + away.x * leave, P.y + h, P.z + Math.sin(th) * r + away.z * leave);
+  };
+  fx.push(puffFx(P, [color, '#FFFFFF', '#FFF1D6'], now, u));
+  fx.push(birdFx(makeBird('birdie', color), u, 3.4, path, flap(7.5, 0.95), now, { bank: 0.15 }));
+}
+// eagle: bursts out on a gold shockwave, circles the flag with a golden wake, then spirals away
+function eagleFx(P, color, now) {
+  const u = birdScale(P, 0.015), dir = Math.random() < 0.5 ? 1 : -1, th0 = Math.random() * Math.PI * 2;
+  const path = (t, out) => {
+    const exit = Math.pow(Math.max(0, t - 3.7), 2) * 13 * u;
+    const r = 6.5 * u * (0.08 + 0.92 * smooth01(t / 1.1)) + exit, th = th0 + dir * t * 2.7;
+    const h = u * (0.4 + 4.2 * easeOut(t / 0.9) + t * 0.7) + exit * 0.75;
+    out.set(P.x + Math.cos(th) * r, P.y + h, P.z + Math.sin(th) * r);
+  };
+  const power = flap(2.6, 0.85, 0.1), again = flap(2.2, 0.7, 0.1);
+  const wings = t => (t < 1.1 ? power(t) : t > 3.6 && t < 4.5 ? again(t) : [0.15 + 0.06 * Math.sin(t * 3), 0.05 + 0.08 * Math.sin(t * 3 - 0.6)]);
+  const bird = makeBird('eagle', color), T = 5.2, f = birdFx(bird, u, T, path, wings, now, { bank: 0.13, grow: 0.4 });
+  fx.push(shockFx(P, now, 0, '#FFD23F', 0.1), shockFx(P, now, 0.14, color, 0.1), f);
+  fx.push(sparkTrail(v => v.copy(bird.group.position), () => f.t > 0.3 && f.t < T - 0.4, ['#FFF3B0', '#FFD23F', '#F2A900'], now, { rate: 3, life: 0.9, size: 7, jitter: 0.003 }));
+}
+// albatross: a huge seabird rises out of the cup and glides a long figure-eight with vapor off its wingtips
+function albatrossFx(P, color, now) {
+  const u = birdScale(P, 0.0125), away = awayFrom(P), side = new THREE.Vector3(-away.z, 0, away.x), A = 10 * u, T = 6.8;
+  const path = (t, out) => {
+    const ph = t * 1.2, amp = A * (0.25 + 0.75 * smooth01(t / 1.2));
+    const x = amp * Math.sin(ph), z = amp * Math.sin(ph) * Math.cos(ph) * 0.9;
+    const leave = Math.pow(Math.max(0, t - 5.3), 2) * 11 * u;
+    const h = u * (0.3 + 3.2 * easeOut(t / 1.1)) + u * 0.7 * Math.sin(ph * 2) * smooth01(t - 1) + leave * 0.6;
+    out.set(P.x + side.x * x + away.x * (z + leave), P.y + h, P.z + side.z * x + away.z * (z + leave));
+  };
+  const big = flap(1.6, 0.75, 0.05), late = flap(1.4, 0.55, 0.05);
+  const wings = t => (t < 1.25 ? big(t) : t > 5.4 && t < 6.2 ? late(t) : [0.05 + 0.03 * Math.sin(t * 2), -0.07 + 0.04 * Math.sin(t * 2 - 0.5)]);
+  const bird = makeBird('albatross', color), f = birdFx(bird, u, T, path, wings, now, { bank: 0.3, grow: 0.5 });
+  fx.push(flashFx(P, now), shockFx(P, now, 0, '#FFFFFF', 0.12), shockFx(P, now, 0.16, '#A9D4FF', 0.12), shockFx(P, now, 0.32, color, 0.12), f);
+  const gliding = () => f.t > 1.1 && f.t < T - 0.5;
+  for (const tip of bird.tips) fx.push(sparkTrail(v => tip.getWorldPosition(v), gliding, ['#FFFFFF', '#EAF5FF', '#BFE0FF'], now, { rate: 3, life: 1.5, size: 5, jitter: 0.0012, additive: false, wait: 3 }));
+  fx.push(fireworkFx(P.clone().addScaledVector(side, 6 * u), '#FFFFFF', now, 5.6, 1.1), fireworkFx(P.clone().addScaledVector(side, -6 * u), color, now, 5.85, 1.1));
+}
+
+// hole in one: a pillar of light, a flock spiralling up it, a ring of fireworks, confetti and a banner
+const pillarTex = (() => {
+  const c = document.createElement('canvas'); c.width = 4; c.height = 128;
+  const g = c.getContext('2d'), r = g.createLinearGradient(0, 0, 0, 128);
+  r.addColorStop(0, 'rgba(255,255,255,0)'); r.addColorStop(0.55, 'rgba(255,255,255,0.35)'); r.addColorStop(1, 'rgba(255,255,255,1)');
+  g.fillStyle = r; g.fillRect(0, 0, 4, 128);
+  return new THREE.CanvasTexture(c);
+})();
+function pillarFx(P, u, now) {
+  const group = new THREE.Group(); group.position.copy(P); scene.add(group);
+  const beam = (rt, rb, color, op) => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, 1, 32, 1, true), new THREE.MeshBasicMaterial({ map: pillarTex, color, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false }));
+    m.renderOrder = 8; m.userData.op = op; group.add(m); return m;
+  };
+  const beams = [beam(2.2 * u, 1.3 * u, '#FFD36A', 0.75), beam(0.7 * u, 0.45 * u, '#FFFFFF', 1)];
+  const H = 80 * u, t0 = now;
+  return {
+    update(now) {
+      const t = ((now - t0) / 1000) * FX_TIME, h = H * easeOut(t / 0.7);
+      const a = Math.min(1, t / 0.1) * (t > 5.8 ? Math.max(0, 1 - (t - 5.8) / 1.2) : 1) * (0.85 + 0.15 * Math.sin(t * 9));
+      for (const m of beams) { m.scale.y = Math.max(0.01, h); m.position.y = h / 2; m.material.opacity = m.userData.op * a; }
+      return t < 7;
+    },
+    dispose() { disposeGroup(group); },
+  };
+}
+function confettiFx(P, u, color, now, delay) {
+  const N = 280, pos = new Float32Array(N * 3).fill(-1e5), col = new Float32Array(N * 4), seed = [];
+  const pal = ['#FFD23F', '#FFFFFF', color, '#FF7AB6', '#7FE0A0', '#6EC8FF'].map(c => new THREE.Color(c));
+  for (let i = 0; i < N; i++) {
+    const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * 18 * u;
+    seed.push([P.x + Math.cos(a) * r, P.y + (28 + Math.random() * 30) * u, P.z + Math.sin(a) * r, (2.6 + Math.random() * 2.2) * u, 1.5 + Math.random() * 2, Math.random() * 6]);
+    const c = pal[i % pal.length]; col.set([c.r, c.g, c.b, 1], i * 4);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.BufferAttribute(col, 4));
+  const mat = new THREE.PointsMaterial({ size: 5, sizeAttenuation: false, vertexColors: true, transparent: true, depthWrite: false });
+  const pts = new THREE.Points(geo, mat); pts.frustumCulled = false; pts.renderOrder = 9; scene.add(pts);
+  const t0 = now + delay * 1000;
+  return {
+    update(now) {
+      const t = ((now - t0) / 1000) * FX_TIME;
+      if (t < 0) return true;
+      for (let i = 0; i < N; i++) {
+        const [x, y, z, vy, f, ph] = seed[i], sway = Math.sin(t * f + ph) * u * 1.3;
+        pos[i * 3] = x + sway; pos[i * 3 + 1] = Math.max(P.y + 0.05, y - vy * t); pos[i * 3 + 2] = z + Math.cos(t * f * 0.8 + ph) * u * 1.1;
+        col[i * 4 + 3] = (0.55 + 0.45 * Math.abs(Math.sin(t * f * 2 + ph))) * (t > 5.6 ? Math.max(0, 1 - (t - 5.6) / 1.2) : 1);
+      }
+      geo.attributes.position.needsUpdate = true; geo.attributes.color.needsUpdate = true;
+      return t < 6.8;
+    },
+    dispose() { scene.remove(pts); geo.dispose(); mat.dispose(); },
+  };
+}
+function aceBannerFx(it, color, now) {
+  const ch = C.holes[it.h], yd = Math.round(it.totalYd || ch.yards);
+  const club = it.kind === 'shot' && it.club != null ? clubName(it.club) : '';
+  const el = document.createElement('div'); el.className = 'ace'; el.style.setProperty('--c', color);
+  el.innerHTML = `<div class="ace-t">Hole in one</div><div class="ace-s">${esc(PL[it.p].name)} · Hole ${it.h + 1} · ${yd} yd${club ? ' · ' + esc(club) : ''}</div>`;
+  // centre it on the open part of the view, clear of the shot list, and size it to fit
+  const card = document.querySelector('.hole-card').getBoundingClientRect(), list = document.querySelector('.shots').getBoundingClientRect();
+  let x0 = 0, x1 = innerWidth, y0 = 0, y1 = innerHeight;
+  if (list.left > innerWidth * 0.5) x1 = list.left; else y1 = Math.min(y1, list.top);
+  if (card.right > innerWidth * 0.6) y0 = card.bottom;
+  el.style.left = `${(x0 + x1) / 2}px`; el.style.top = `${y0 + (y1 - y0) * 0.42}px`;
+  el.querySelector('.ace-t').style.fontSize = `${THREE.MathUtils.clamp((x1 - x0) * 0.125, 40, 150)}px`;
+  document.body.appendChild(el);
+  const t0 = now;
+  return { update(now) { return now - t0 < 6400; }, dispose() { el.remove(); } };
+}
+function aceFx(it, P, color, now) {
+  fx.push(aceBannerFx(it, color, now));
+  if (reduceMotion) return;
+  const u = birdScale(P, 0.011), dist = camera.position.distanceTo(P);
+  fx.push(flashFx(P, now), shockFx(P, now, 0, '#FFFFFF', 0.16), shockFx(P, now, 0.15, '#FFD23F', 0.16), shockFx(P, now, 0.32, color, 0.16), pillarFx(P, u, now));
+  const flockCols = ['#FFD23F', '#FFFFFF', color];
+  for (let i = 0; i < 16; i++) {
+    const th0 = (i / 16) * Math.PI * 2, rr = 1.2 + Math.random() * 2.6, w = (2 + Math.random() * 0.7) * (i % 2 ? 1 : -1), climb = 5.5 + Math.random() * 2.5;
+    const path = (t, out) => {
+      const scatter = Math.pow(Math.max(0, t - 3.4), 2) * 7 * u, r = u * (0.3 + rr * smooth01(t / 0.8) + t * 1.1) + scatter, th = th0 + t * w;
+      out.set(P.x + Math.cos(th) * r, P.y + u * (0.3 + t * climb), P.z + Math.sin(th) * r);
+    };
+    fx.push(birdFx(makeBird('birdie', flockCols[i % 3]), u * (0.7 + Math.random() * 0.3), 6.2, path, flap(7 + Math.random() * 2, 0.9), now, { delay: 0.2 + i * 0.06, bank: 0.2 }));
+  }
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2, at = P.clone().add(new THREE.Vector3(Math.cos(a), 0, Math.sin(a)).multiplyScalar(9 * u));
+    fx.push(fireworkFx(at, flockCols[i % 3], now, 0.9 + i * 0.32, 1.3));
+  }
+  fx.push(fireworkFx(P, '#FFD23F', now, 3.1, 1.8));
+  fx.push(confettiFx(P, u, color, now, 1.1));
+  shake = { t0: now, dur: 650, amp: dist * 0.008 };
+}
+// returns how long the replay should wait before moving on
+function scoreFx(it, now) {
+  const sc = it.score; if (!sc) return 0;
+  const color = PCOL[it.p % PCOL.length], P = onGround(C.holes[it.h].pinV, 0.05);
+  if (sc.kind === 'ace') { aceFx(it, P, color, now); return SCORE_HOLD.ace; }
+  const holedOut = it.stiff && it.stiff.big;
+  // a holed-out approach keeps its target and fireworks, under the score's banner
+  if (holedOut) celebrate(it, now, { ...it.stiff, noLabel: true });
+  const tail = holedOut ? ' · holed out' : '';
+  const info = { birdie: { label: `Birdie${tail}`, cls: 'bird' }, eagle: { big: true, label: `Eagle!${tail}` }, albatross: { big: true, label: `${sc.name}!${tail}`, cls: 'alba' } }[sc.kind];
+  fx.push(cheerFx(P.clone().setY(P.y + 1), info, color, now));
+  if (!reduceMotion) ({ birdie: birdieFx, eagle: eagleFx, albatross: albatrossFx })[sc.kind](P, color, now);
+  return SCORE_HOLD[sc.kind];
+}
+// preview any of them at the current hole's green: keys 1-4
+let previewTimer = 0;
+function previewScore(n) {
+  if (state.all || reel) return;
+  const pi = state.who === 'both' ? 0 : state.who, hi = state.hole, ch = C.holes[hi];
+  const kind = ['birdie', 'eagle', 'albatross', 'ace'][n - 1], pin = [ch.pinV.x, ch.pinV.y, ch.pinV.z];
+  const it = { p: pi, h: hi, kind: 'preview', start: ch.tee, end: pin, td: pin, score: { kind, name: { birdie: 'Birdie', eagle: 'Eagle', albatross: 'Albatross', ace: 'Hole in one' }[kind] } };
+  stopAnim(); clearTimeout(previewTimer);
+  const view = greenView(it), far = camera.position.distanceTo(view.pos) > 8;
+  if (far) flyTo(view, 900);
+  previewTimer = setTimeout(() => scoreFx(it, performance.now()), far && !reduceMotion ? 950 : 0);
+}
+
+const SPEED = 2.2, GREEN_R = 35;
+function greenView(it) {
+  // frame the pin and where this ball lands and stops, looking down the line of the shot
+  const ch = C.holes[it.h], pin = ch.pinV, end = v3(it.end), s = v3(it.start);
+  const R = Math.min(46, Math.max(22, horiz(end, pin) + 10));
+  const pts = [pin, onGround(end), onGround(v3(it.td))];
+  for (let a = 0; a < 8; a++) { const t = (a / 8) * Math.PI * 2; pts.push(new THREE.Vector3(pin.x + Math.cos(t) * R, pin.y, pin.z + Math.sin(t) * R)); }
+  const back = new THREE.Vector3().subVectors(s, pin).setY(0);
+  if (back.lengthSq() < 4) back.subVectors(ch.teeV, pin).setY(0);
+  return viewFor(pts, sideDir(it.h, back.normalize(), 18), 36);
+}
+function baseView(it) { return anim.mode === 'shot' ? shotView(it.h, it) : replayView(it.h); }
+function direct(it, first) {
+  if (!anim.auto || !it.tl || anim.mode === 'reel') return false;
+  const pin = C.holes[it.h].pinV;
+  const endsNear = horiz(v3(it.end), pin) < GREEN_R, startsNear = horiz(v3(it.start), pin) < 50;
+  if (first) {
+    if (endsNear && startsNear) { flyTo(greenView(it), anim.cam === 'green' ? 700 : 1000); anim.cam = 'green'; return true; }
+    if (anim.mode === 'shot' && anim.i === 0) return false;   // a clicked shot is already framed
+    flyTo(shotView(it.h, it), anim.cam === 'green' ? 1000 : 850); anim.cam = 'base'; return true;
+  }
+  if (endsNear && anim.cam !== 'green') {
+    const left = horiz(ball.position, pin), whole = horiz(v3(it.start), pin);
+    if (left < Math.max(45, whole * 0.45)) { flyTo(greenView(it), 1300); anim.cam = 'green'; }
+  }
+}
+function nextItem(now, hold) {
+  if (anim.i + 1 < anim.queue.length) { anim.i++; anim.holdUntil = now + hold; return; }
+  anim.doneAt = now + Math.max(hold, 700);
+}
+function finishAnim(now) {
+  const wasGreen = anim.cam === 'green', auto = anim.auto, mode = anim.mode, done = anim.onDone;
+  anim = null; ball.visible = false; setPlayLabel(); markPlaying(null);
+  if (done) done();
+  // after a whole-hole replay, linger on the green, then pull back to the hole
+  if (mode === 'hole' && auto) afterReplay = { at: now + (wasGreen ? 1800 : 900) };
+}
+function stepAnim(now) {
+  if (!anim) return;
+  const dt = Math.min(0.25, (now - anim.last) / 1000); anim.last = now;
+  if (anim.doneAt) { if (now >= anim.doneAt) finishAnim(now); return; }
+  if (now < anim.holdUntil) return;
+  const it = anim.queue[anim.i];
+  if (anim.started !== anim.i) {
+    anim.started = anim.i; anim.t = 0;
+    if (it.tl) ball.position.copy(it.tl.pts[0]);
+    else if (anim.mode === 'reel' && it.puttPath) { ball.position.copy(it.puttPath[0]); ball.visible = true; }
+    markPlaying(it);
+    if (direct(it, true)) { anim.holdUntil = now + 700; return; }
+  }
+  if (anim.launched !== anim.i) { anim.launched = anim.i; if (it.bomb) launchBomb(it, now); }
+  anim.t += dt * SPEED * (anim.speed || 1);
+  const t = anim.t;
+  const fxOn = anim.mode !== 'reel' || anim.fx;
+  if (!it.tl) {
+    if (anim.mode === 'reel' && it.puttPath) {
+      // on the reel an auto-putt rolls in along its line, slowing as it gets to the hole
+      const u = Math.min(1, t / (anim.puttDur || 2.5)), e = 1 - (1 - u) * (1 - u), P = it.puttPath;
+      const f = e * (P.length - 1), k = Math.min(P.length - 2, Math.floor(f));
+      ball.position.copy(P[k]).lerp(P[k + 1], f - k);
+      if (u < 1) return;
+      ball.visible = false;
+      revealAll(it);
+      if (anim.cheer && !it.score) fx.push(cheerFx(onGround(C.holes[it.h].pinV, 1), { label: anim.cheer }, PCOL[it.p % PCOL.length], now));
+      nextItem(now, (fxOn && it.score && scoreFx(it, now)) || (anim.cheer ? 2200 : 600));
+      return;
+    }
+    if (t > 1.2) { revealAll(it); nextItem(now, (it.score && scoreFx(it, now)) || 300); }
+    return;
+  }
+  const { pts, times, total } = it.tl;
+  let seg = 0; while (seg < times.length - 2 && times[seg + 1] < t) seg++;
+  const f = Math.min(1, Math.max(0, (t - times[seg]) / Math.max(1e-6, times[seg + 1] - times[seg])));
+  ball.position.copy(pts[seg]).lerp(pts[seg + 1], f);
+  ball.element.classList.toggle('hot', !!it.bomb && t < it.flightT);
+  if (anim.chase && anim.auto) chaseCam(it, dt);
+  const nFlight = it.flight.length > 1 ? it.flight.length - 1 : 0;
+  const flightSegs = Math.min(nFlight, seg + 1);
+  for (const name of ['flight', 'halo', 'track']) { const l = it.lines[name]; if (!l) continue; l.visible = true; l.geometry.instanceCount = flightSegs; }
+  if (it.lines.roll) { const rs = Math.max(0, seg + 1 - nFlight); it.lines.roll.visible = rs > 0; it.lines.roll.geometry.instanceCount = rs; }
+  if (t >= it.flightT && it.landObj) it.landObj.visible = true;
+  direct(it, false);
+  if (t >= total) {
+    revealAll(it);
+    const hold = !fxOn ? 0 : it.score ? scoreFx(it, now) : it.stiff && celebrate(it, now) ? 2600 : 0;
+    nextItem(now, hold || (anim.mode === 'reel' ? 500 : anim.cam === 'green' ? 1100 : 420));
+  }
+}
+// ---------------------------------------------------------------- highlight reel
+// The round's best moments, picked when the page loads and played in round order. The best shots are
+// shown from several angles (down the line, a chase cam, the landing or the green), cut together with
+// quick fades under a broadcast-style title card. Pressing anything else ends the reel.
+let REEL_PACE = 1;                      // scales the reel's own pauses (tests speed it up)
+const HL_TAKE = {
+  dtl: 'Down the line', chase: 'Chase cam', landing: 'Landing view', green: 'From the green', shot: 'The shot', putt: 'On the green',
+};
+function findHighlights() {
+  const out = [];
+  const yd = m => Math.round(m * YD);
+  let longest = null;   // the round's longest drive that finished in the fairway (long-drive contest rules)
+  PL.forEach((pl, pi) => {
+    pl.holes.forEach((h, hi) => {
+      if (!h) return;
+      const ch = C.holes[hi], items = h.items;
+      const holing = items.find(x => x.score);
+      const firstPutt = items.find(x => x.kind === 'putt' && x.lines);
+      const puttStep = holing && (holing.kind === 'putt' || holing.putt) ? holing : null;
+      const shots = items.filter(x => x.kind === 'shot' && x.tl);
+      for (const it of shots) {
+        const from = `${it.putt ? 'Putter' : clubName(it.club)} from ${yd(horiz(v3(it.start), ch.pinV))} yd`;
+        const base = { pi, hi, it, sub: from };
+        if (it.score && !it.putt && it.score.kind !== 'birdie') {
+          out.push({ ...base, tier: 0, val: 10, title: it.score.kind === 'ace' ? 'Hole in one!' : `${it.score.name}!`, takes: [['dtl', it], ['green', it, { slow: true, fx: true }]] });
+        } else if (it.stiff && it.stiff.big) {
+          out.push({ ...base, tier: 0, val: 9, title: it.stiff.label, takes: [['dtl', it], ['green', it, { slow: true, fx: true }]] });
+        } else if (it.bomb) {
+          out.push({ ...base, sub: `${clubName(it.club)} · ${yd(it.totalYd / YD)} yd total`, tier: 0, val: 8, title: `Bomb · ${it.bomb.carry} yd carry`,
+                     takes: [['dtl', it, { fx: true }], ['chase', it, { fx: true }], ['landing', it, { slow: true }]] });
+        } else if (it.stiff && !it.putt) {
+          const birdie = puttStep && holing.score;
+          const takes = [['dtl', it], ['green', it, { slow: true, fx: true }]];
+          if (birdie) takes.push(['putt', puttStep, { fx: true }]);
+          out.push({ ...base, tier: 1, val: 5 - it.toPinM, title: `Stuck it · ${Math.max(1, Math.round(it.toPinM * FT))} ft${birdie ? ` · ${holing.score.name.toLowerCase()}` : ''}`, takes });
+        } else if (it.putt && it.holed && horiz(v3(it.start), ch.pinV) * FT >= 20) {
+          out.push({ ...base, sub: `Putter from ${Math.round(horiz(v3(it.start), ch.pinV) * FT)} ft`, tier: holing === it ? 1 : 2, val: 2,
+                     title: `Drained it · ${Math.round(horiz(v3(it.start), ch.pinV) * FT)} ft${holing === it ? ` · ${it.score.name.toLowerCase()}` : ''}`, takes: [['shot', it, { fx: true }]] });
+        }
+        if (it.stroke === 1 && !it.putt && !it.pen && ch.par > 3 && it.toLie === 'Fairway' && (!longest || it.totalYd > longest.it.totalYd)) longest = { ...base, it };
+      }
+      // birdies and better that ended with an auto-putt and didn't come from a stuck approach: the approach, then the putt
+      if (puttStep && !out.some(o => o.pi === pi && o.hi === hi && o.takes.some(t => t[1] === puttStep))) {
+        const appr = [...shots].reverse().find(x => !x.putt && !x.pen);
+        const ft = Math.round((h.puttFromM || 0) * FT);
+        const takes = appr ? [['shot', appr], ['putt', puttStep, { fx: true }]] : [['putt', puttStep, { fx: true }]];
+        out.push({ pi, hi, it: appr || puttStep, sub: appr ? `${clubName(appr.club)}, then ${ft} ft putt` : `${ft} ft putt`,
+                   tier: holing.score.kind === 'birdie' ? 1 : 0, val: 3, title: holing.score.name, takes });
+      } else if (!puttStep && firstPutt && (h.puttFromM || 0) * FT >= 20 && items.filter(x => x.kind === 'putt').length === 1 && firstPutt.holed) {
+        const ft = Math.round(h.puttFromM * FT);
+        out.push({ pi, hi, it: firstPutt, sub: `${ft} ft putt`, tier: 2, val: ft / 10, title: `Drained it · ${ft} ft`, takes: [['putt', firstPutt, { cheer: `Drained it · ${ft} ft` }]] });
+      }
+    });
+  });
+  if (longest) {
+    const bomb = out.find(o => o.it === longest.it && o.title.startsWith('Bomb'));
+    if (bomb) bomb.sub += ' · longest drive';      // already in the reel: just say so
+    else out.push({ ...longest, tier: 1, val: 4, sub: `${clubName(longest.it.club)} · ${Math.round(longest.it.carryYd)} yd carry, in the fairway`,
+                    title: `Longest drive · ${Math.round(longest.it.totalYd)} yd`, takes: [['dtl', longest.it], ['landing', longest.it]] });
+  }
+  // everything in the top tier, the best of the rest up to ten moments, then in the order they happened
+  const pick = [...out].sort((a, b) => a.tier - b.tier || b.val - a.val).filter((o, k) => o.tier === 0 || k < 10);
+  return pick.sort((a, b) => a.hi - b.hi || (a.it.gsn ?? 0) - (b.it.gsn ?? 0) || a.pi - b.pi);
+}
+const HIGHLIGHTS = findHighlights();
+
+// cameras for each take
+function dtlView(it) {
+  const s = v3(it.start), e = v3(it.end), back = new THREE.Vector3().subVectors(s, e).setY(0);
+  if (back.lengthSq() < 1) back.subVectors(C.holes[it.h].teeV, C.holes[it.h].pinV).setY(0);
+  back.normalize();
+  const pts = [s, e, v3(it.td), ...it.flight.filter((_, k) => k % 3 === 0).map(v3)];
+  return viewFor(pts, sideDir(it.h, back, 6), 11);
+}
+function landingView(it) {
+  // from out beyond where it comes down, looking back up the line as it drops in
+  const s = v3(it.start), e = v3(it.end), fwd = new THREE.Vector3().subVectors(e, s).setY(0).normalize();
+  const n = it.flight.length, pts = [v3(it.td), onGround(e), ...it.flight.filter((_, k) => k > n * 0.68).map(v3)];
+  return viewFor(pts, sideDir(it.h, fwd, 22), 10);
+}
+function greenSideView(it) {
+  // low, off the side of the green, watching the ball come in to the pin
+  const ch = C.holes[it.h], pin = ch.pinV, s = v3(it.start);
+  const fwd = new THREE.Vector3().subVectors(pin, s).setY(0).normalize();
+  const pts = [pin, onGround(v3(it.end)), onGround(v3(it.td))];
+  for (let a = 0; a < 8; a++) { const t = (a / 8) * Math.PI * 2; pts.push(new THREE.Vector3(pin.x + Math.cos(t) * 9, pin.y, pin.z + Math.sin(t) * 9)); }
+  return viewFor(pts, sideDir(it.h, fwd, 58), 13);
+}
+function puttView(it) {
+  const h = PL[it.p].holes[it.h], pin = C.holes[it.h].pinV, from = it.puttPath ? it.puttPath[0] : it.tl ? v3(it.start) : h.puttFrom || pin;
+  const back = new THREE.Vector3().subVectors(from, pin).setY(0);
+  if (back.lengthSq() < 0.5) back.set(1, 0, 0);
+  back.normalize();
+  const pts = [from, pin];
+  for (let a = 0; a < 6; a++) { const t = (a / 6) * Math.PI * 2; pts.push(new THREE.Vector3(pin.x + Math.cos(t) * 4, pin.y, pin.z + Math.sin(t) * 4)); }
+  return viewFor(pts, sideDir(it.h, back, 10), 20);
+}
+function chaseDir(it) { return new THREE.Vector3().subVectors(v3(it.end), v3(it.start)).setY(0).normalize(); }
+function chasePose(it, at, out = {}) {
+  const d = chaseDir(it);
+  out.pos = at.clone().addScaledVector(d, -30).add(new THREE.Vector3(0, 8, 0));
+  out.target = at.clone().addScaledVector(d, 30).add(new THREE.Vector3(0, -2, 0));
+  return out;
+}
+function takeView(kind, it) {
+  if (kind === 'dtl') return dtlView(it);
+  if (kind === 'landing') return landingView(it);
+  if (kind === 'green') return greenSideView(it);
+  if (kind === 'putt') return puttView(it);
+  if (kind === 'chase') return chasePose(it, v3(it.start));
+  return it.putt ? greenSideView(it) : shotView(it.h, it);
+}
+const _cp = {};
+function chaseCam(it, dt) {
+  chasePose(it, ball.position, _cp);
+  const k = 1 - Math.exp(-dt * 3.2);
+  camera.position.lerp(_cp.pos, k); controls.target.lerp(_cp.target, k);
+}
+
+// ui: the button at the top, the title card and the black used for cuts
+document.body.insertAdjacentHTML('beforeend', `
+  <button class="reel-btn" id="b-reel" hidden><svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.2l1.9 4.3 4.6.4-3.5 3 1 4.6L8 11.1l-4 2.4 1-4.6-3.5-3 4.6-.4z"/></svg><span>Highlights</span></button>
+  <div class="reel-card" id="reel-card" hidden><div class="rc-top"></div><div class="rc-title"></div><div class="rc-take"></div></div>`);
+const reelBtn = $('b-reel'), reelCard = $('reel-card');
+if (HIGHLIGHTS.length) { reelBtn.hidden = false; reelBtn.title = `Play the round's ${HIGHLIGHTS.length} best moments (H)`; }
+function placeReelUi() {
+  const card = document.querySelector('.hole-card').getBoundingClientRect(), list = document.querySelector('.shots').getBoundingClientRect();
+  const wide = innerWidth > 760;
+  const x0 = wide ? card.right : 0, x1 = wide ? list.left : innerWidth, cx = (x0 + x1) / 2;
+  const top = wide ? 16 : card.bottom + 8;
+  reelBtn.style.left = `${cx}px`; reelBtn.style.top = `${top}px`;
+  reelCard.style.left = `${cx}px`; reelCard.style.top = `${top + 46}px`;
+}
+addEventListener('resize', placeReelUi); placeReelUi();
+
+let reel = null;
+const sleep = ms => new Promise(r => setTimeout(r, ms * REEL_PACE));
+function setReelLabel() {
+  reelBtn.querySelector('span').textContent = reel ? `Stop · ${Math.min(reel.k + 1, HIGHLIGHTS.length)} of ${HIGHLIGHTS.length}` : 'Highlights';
+  reelBtn.classList.toggle('on', !!reel);
+}
+async function cut(view) {
+  // dip the 3D view to the sky and back: a soft cut that leaves the panels alone
+  if (!reduceMotion) { stage.classList.add('dip'); await sleep(240); }
+  tween = null; flyTo(view, 0);
+  if (!reduceMotion) stage.classList.remove('dip');
+}
+function showCard(hl, take, fresh) {
+  const ch = C.holes[hl.hi], color = PCOL[hl.pi % PCOL.length];
+  reelCard.style.setProperty('--c', color);
+  reelCard.querySelector('.rc-top').innerHTML = `<span class="who">${esc(PL[hl.pi].name)}</span><span>Hole ${ch.n} · Par ${ch.par}</span>`;
+  reelCard.querySelector('.rc-title').textContent = hl.title;
+  const [kind, , o = {}] = take, multi = hl.takes.length > 1;
+  const chip = multi ? [HL_TAKE[kind], o.slow ? 'slow motion' : ''].filter(Boolean).join(' · ') : '';
+  reelCard.querySelector('.rc-take').innerHTML = `<span class="sub">${esc(hl.sub)}</span>${chip ? `<span class="chip">${esc(chip)}</span>` : ''}`;
+  reelCard.hidden = false;
+  if (fresh) { reelCard.classList.remove('in'); void reelCard.offsetWidth; reelCard.classList.add('in'); }
+  REEL_TOP = reelCard.getBoundingClientRect().bottom; updateViewOffset();
+}
+// reel-driven navigation must not count as the viewer taking over
+function internal(fn) { const r = reel; if (r) r.busy = true; try { fn(); } finally { if (r) r.busy = false; } }
+function userTakesOver() { if (reel && !reel.busy) endReel(false); }
+function endReel(restore) {
+  if (!reel) return;
+  const r = reel; reel = null;
+  r.cancelled = true;
+  if (anim && anim.mode === 'reel') stopAnim();
+  r.hidden.forEach(revealAll);
+  reelCard.hidden = true; stage.classList.remove('dip');
+  document.body.classList.remove('reel-on');
+  if (reelPlayerColors) { reelPlayerColors = false; recolor(); }
+  REEL_TOP = null; updateViewOffset();
+  setReelLabel(); setPlayLabel();
+  if (restore) {
+    internal(() => {
+      state.who = r.prev.who;
+      if (r.prev.all) goAll(); else { goHole(r.prev.hole, { fly: false }); flyTo(holeView(state.hole), 1100); }
+    });
+  }
+}
+function playTake(it, opts) {
+  return new Promise(resolve => {
+    internal(() => play([it], 'reel'));
+    Object.assign(anim, { speed: opts.slow ? 0.6 : 1, fx: !!opts.fx, chase: opts.kind === 'chase', cheer: opts.cheer, onDone: resolve });
+    if (it.kind === 'putt' && it.puttPath) {
+      const L = it.puttPath.reduce((a, p, k, arr) => a + (k ? p.distanceTo(arr[k - 1]) : 0), 0);
+      anim.puttDur = THREE.MathUtils.clamp(1.4 + L * 0.28, 1.8, 5);   // sim seconds: long putts take their time
+    }
+  });
+}
+async function runReel(from = 0) {
+  if (reel || !HIGHLIGHTS.length) return;
+  closeTeeView(false);
+  const r = reel = { k: 0, busy: false, hidden: [], prev: { hole: state.hole, all: state.all, who: state.who } };
+  document.body.classList.add('reel-on'); updateViewOffset();
+  reelPlayerColors = PL.length > 1;
+  setReelLabel();
+  // opening card over the whole course
+  internal(() => goAll());
+  reelCard.style.setProperty('--c', 'var(--ink)');
+  reelCard.querySelector('.rc-top').textContent = `${C.name}${PLAYED ? ' · ' + PLAYED : ''}`;
+  reelCard.querySelector('.rc-title').textContent = 'Round highlights';
+  reelCard.querySelector('.rc-take').innerHTML = `<span class="sub">${HIGHLIGHTS.length} moments</span>`;
+  reelCard.hidden = false; reelCard.classList.remove('in'); void reelCard.offsetWidth; reelCard.classList.add('in');
+  await sleep(from ? 0 : 2400); if (r.cancelled) return;
+  for (let k = from; k < HIGHLIGHTS.length; k++) {
+    const hl = HIGHLIGHTS[k];
+    r.k = k; setReelLabel();
+    internal(() => { state.who = hl.pi; goHole(hl.hi, { fly: false }); });
+    // show the hole as it stood: shots after this moment stay hidden until it's done
+    const items = PL[hl.pi].holes[hl.hi].items, first = items.indexOf(hl.takes[0][1]);
+    items.forEach((x, i) => { if (i >= first) { hideForPlay(x); r.hidden.push(x); } });
+    for (let t = 0; t < hl.takes.length; t++) {
+      const [kind, it, o = {}] = hl.takes[t];
+      showCard(hl, hl.takes[t], t === 0);
+      await cut(takeView(kind, it)); if (r.cancelled) return;
+      await playTake(it, { ...o, kind }); if (r.cancelled) return;
+      if (t < hl.takes.length - 1) { await sleep(450); if (r.cancelled) return; }
+    }
+    items.forEach(revealAll);
+    await sleep(900); if (r.cancelled) return;
+  }
+  endReel(true);
+}
+reelBtn.addEventListener('click', () => (reel ? endReel(false) : runReel()));
+reelBtn.addEventListener('keydown', e => { if (e.key === ' ') e.stopPropagation(); });
+
+function frame(now) {
+  if (tween) {
+    const k = Math.min(1, (now - tween.start) / tween.ms);
+    const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+    camera.position.lerpVectors(tween.p0, tween.p1, e);
+    controls.target.lerpVectors(tween.t0, tween.t1, e);
+    if (k >= 1) tween = null;
+  }
+  controls.update();
+  stepAnim(now);
+  placeBallShadow();
+  stepFx(now);
+  if (afterReplay && now >= afterReplay.at) { afterReplay = null; if (!state.all) flyTo(replayView(state.hole), 1200); }
+  const dist = camera.position.distanceTo(controls.target);
+  const flagScale = THREE.MathUtils.clamp(dist / 230, 0.3, 1);
+  for (const ch of C.holes) ch.flagGroup.scale.setScalar(flagScale);
+  scene.fog.near = dist * 1.4; scene.fog.far = dist * 4.2 + 600;
+  const jolt = shakeOffset(now);
+  if (jolt) camera.position.add(jolt);
+  renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
+  if (jolt) camera.position.sub(jolt);
+  requestAnimationFrame(frame);
+}
+function onResize() {
+  renderer.setSize(innerWidth, innerHeight);
+  labelRenderer.setSize(innerWidth, innerHeight);
+  lineMats.forEach(m => m.resolution.set(innerWidth, innerHeight));
+  updateViewOffset();
+}
+addEventListener('resize', () => { onResize(); flyTo(state.all ? overviewView() : holeView(state.hole), 0); });
+// once the viewer grabs the camera, the replay stops steering it
+controls.addEventListener('start', () => { tween = null; afterReplay = null; if (anim) anim.auto = false; });
+
+onResize();
+goHole(0, { fly: false });
+flyTo(holeView(0), 0);
+requestAnimationFrame(frame);
+window.__viewer = { goHole, goAll, setWho, selectItem, state, get anim() { return anim; }, get fx() { return fx.length; }, setFxTime: v => (FX_TIME = v), previewScore, highlights: HIGHLIGHTS, get reel() { return reel; }, setReelPace: v => (REEL_PACE = v), runReel, endReel,
+  hiddenLines: () => PL.reduce((n, pl) => n + pl.holes.reduce((m, h) => m + (h ? h.items.filter(it => it.lines && Object.values(it.lines).some(l => !l.visible)).length : 0), 0), 0), celebrate: (pi, hi, k, big) => celebrate(PL[pi].holes[hi].items[k], performance.now(), big ? { big: true, label: 'Holed out! · 34 yd' } : undefined) };
+</script>

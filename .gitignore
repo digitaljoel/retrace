@@ -1,0 +1,24 @@
+# Rounds and generated pages (these hold player names and scores)
+*.dat
+*.html
+!viewer.template.html
+
+# Course data, created by the commands in the README
+lidar/
+osm/
+
+# Local backups
+backup-*/
+
+# macOS metadata
+._*
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local tool settings
+.claude/
