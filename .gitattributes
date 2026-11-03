@@ -1,0 +1,3 @@
+# Windows scripts need Windows line endings, including in GitHub's Download ZIP
+*.bat text eol=crlf
+*.ps1 text eol=crlf

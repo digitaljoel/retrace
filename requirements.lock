@@ -1,0 +1,35 @@
+affine==3.0.1
+    # via rasterio
+attrs==26.1.0
+    # via
+    #   affine
+    #   rasterio
+certifi==2026.10.23
+    # via
+    #   pyproj
+    #   rasterio
+click==8.5.0
+    # via rasterio
+laspy==2.7.0
+    # via -r requirements.txt
+lazrs==0.8.2
+    # via laspy
+numpy==2.5.4
+    # via
+    #   -r requirements.txt
+    #   laspy
+    #   rasterio
+    #   scipy
+    #   shapely
+pillow==13.0.0
+    # via -r requirements.txt
+pyparsing==3.3.3
+    # via rasterio
+pyproj==3.8.0
+    # via -r requirements.txt
+rasterio==1.5.2
+    # via -r requirements.txt
+scipy==1.18.1
+    # via -r requirements.txt
+shapely==2.2.0
+    # via -r requirements.txt

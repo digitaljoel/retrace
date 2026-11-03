@@ -2,50 +2,33 @@
 
 Relive your GSPro rounds. Retrace runs quietly on your GSPro PC, and when you finish a round it builds a
 3D replay you can open in any browser: every shot's flight and roll, hole by hole, with a scorecard, shot
-data, a player switcher and a highlight reel of the round's best moments. All your rounds are listed on one
-page, and you can put that page in a cloud bucket to see your rounds from anywhere.
+data, a player switcher and a highlight reel of the round's best moments. Your rounds stay on your own PC, listed
+on one page that opens in your browser. If you'd like to see them from anywhere, you can also put them in a cloud bucket.
 
 Retrace is an independent community project, not made by or affiliated with GSPro. It's an early prototype,
 so please open an issue if something doesn't work on your setup.
 
 ## Install
 
-Do this on the PC that runs GSPro. You don't need to know how to program; you'll paste a few commands.
+On the PC that runs GSPro:
 
-**1. Install Python.** Get Python 3.9 or newer from [python.org](https://www.python.org/downloads/windows/).
-On the installer's first screen, tick **Add python.exe to PATH**.
+1. On this project's [GitHub page](https://github.com/digitaljoel/retrace), click **Code > Download ZIP**.
+2. Right-click the zip and choose **Extract All**.
+3. Open the extracted folder and double-click **Install.bat**.
 
-**2. Get Retrace.** On this project's [GitHub page](https://github.com/digitaljoel/retrace), click
-**Code > Download ZIP** and unzip it somewhere permanent, such as `C:\Retrace`. Make sure `retrace.py` is
-directly inside that folder, not in another folder within it. If you use git, cloning works too.
+That's it. You don't need to install Python or have administrator rights, and the zip can be deleted afterwards.
+Retrace takes about 400 MB, and setup needs an internet connection.
 
-**3. Install what it needs.** Open PowerShell and run:
+If Windows shows "Windows protected your PC", click **More info**, then **Run anyway**. Retrace isn't code-signed
+yet, so Windows doesn't recognize it. You can read `install.ps1` first to see exactly what it does.
 
-```powershell
-cd C:\Retrace
-python -m venv .venv
-.venv\Scripts\python.exe -m pip install -r requirements.txt
-```
+**Then play a round.** Retrace runs in the background and starts whenever you sign in. Shortly after you hole out
+on the 18th, double-click **Retrace Rounds** on your desktop to see your rounds in your browser.
 
-**4. Check that it can find GSPro.**
+To update, download the new zip and run **Install.bat** again; your rounds and settings stay. To remove Retrace, run
+**Uninstall.bat** in `%LOCALAPPDATA%\Programs\Retrace`. Your rounds stay in `C:\Users\<you>\Retrace` until you delete them.
 
-```powershell
-.venv\Scripts\python.exe retrace.py check
-```
-
-`ok` means found, `!!` means something needs fixing, and `-` is just information. If you've never finished
-a shot in GSPro on this PC, the round file won't exist yet, which is fine. See
-[Where Retrace looks for GSPro](#where-retrace-looks-for-gspro) if something isn't found.
-
-**5. Start it, now and whenever you sign in to Windows.**
-
-```powershell
-.venv\Scripts\python.exe retrace.py startup on
-.venv\Scripts\pythonw.exe retrace.py watch
-```
-
-There's no window: it runs in the background. **Play a round**, and shortly after you hole out on the 18th,
-open `C:\Users\<you>\Retrace\rounds\index.html`.
+If the setup window reports a problem finding GSPro, see the next section.
 
 ## Where Retrace looks for GSPro
 
@@ -58,7 +41,7 @@ open `C:\Users\<you>\Retrace\rounds\index.html`.
 `AppData` is a hidden folder. To find it, paste `%USERPROFILE%\AppData\LocalLow` into File Explorer's address
 bar. If you moved your courses, the location is in GSPro under **Settings > Game > Course Folder**.
 
-After changing a setting, restart the watcher: run `retrace.py stop`, then the `pythonw.exe` command above.
+These are commands; see [Commands](#commands) for how to run them. After changing a setting, restart your PC or the watcher.
 
 ## How it knows a round is over
 
@@ -84,10 +67,11 @@ Rounds under 9 holes are saved but not built. To build one anyway, or to change 
 
 Builds run at low priority, so they shouldn't get in the way if you start another round right away.
 
-## See your rounds from anywhere
+## Optional: see your rounds from anywhere
 
-Retrace can copy each new page and the rounds list to a Google Cloud Storage or Amazon S3 bucket. Hosting
-pages this small costs little, usually pennies a month, but both providers need a billing account.
+This is an extra, and nothing is uploaded unless you set it up. Retrace can copy each new page and the rounds list to
+a Google Cloud Storage or Amazon S3 bucket. Hosting pages this small costs little, usually pennies a month, but both
+providers need an account with billing, and setup is more technical than the rest of Retrace.
 
 > **A public bucket is public.** Anyone with the link can see the pages, which include the names and scores
 > of everyone in the round. Ask your playing partners first. The pages also include tee-shot pictures from
@@ -152,18 +136,26 @@ your bucket's region.
 
 ### After that
 
-Restart the watcher, and new rounds upload themselves. If an upload fails, for example because the internet
+Restart your PC or the watcher, and new rounds upload themselves. If an upload fails, for example because the internet
 is down, it tries again every 5 minutes. To put rounds in a folder, use `gs://my-golf-replays-example/golf`. Retrace
 only adds and updates files: a page you delete from your PC stays in the bucket until you delete it there too.
 
 ## Commands
 
-Run these from the Retrace folder, starting each with `.venv\Scripts\python.exe`.
+Most people won't need these. Open PowerShell and go to the Retrace folder, then start each with `.venv\Scripts\python.exe`:
+
+```powershell
+cd "$env:LOCALAPPDATA\Programs\Retrace"
+.venv\Scripts\python.exe retrace.py check
+```
+
+To restart the watcher: `.venv\Scripts\python.exe retrace.py stop`, then `.venv\Scripts\pythonw.exe retrace.py watch`.
 
 | Command | What it does |
 |---|---|
 | `retrace.py check` | Shows what was found and what's missing |
 | `retrace.py watch` | Runs the watcher in this window, showing what it's doing (Ctrl+C to stop) |
+| `retrace.py open` | Shows your rounds in your browser |
 | `retrace.py stop` | Stops the background watcher |
 | `retrace.py startup on` / `off` | Starts the watcher when you sign in, or doesn't |
 | `retrace.py build [FILE] [--date YYYY-MM-DD]` | Builds one round now, finished or not (default: the current round) |
@@ -186,8 +178,8 @@ so the page is built from shot data alone. Check `courses_dir`, then rebuild the
 **A build failed.** The reason is in `retrace.log`. A failed round is tried again if it changes or the watcher
 restarts. Please include the error if you open an issue, but look it over first and leave out anything private.
 
-**Uninstall.** Run `retrace.py stop` and `retrace.py startup off`, then delete the Retrace folder and
-`C:\Users\<you>\Retrace`. Delete any bucket you made from your cloud account.
+**Setup failed.** The window says why. Check your internet connection and run **Install.bat** again; it's safe to
+run more than once.
 
 ## Real terrain, greens and trees
 
@@ -224,6 +216,7 @@ The pages credit these too.
 ## How it works
 
 ### Files
+- `Install.bat`, `install.ps1`, `Uninstall.bat`: setup and removal
 - `retrace.py`: the watcher and the commands above
 - `make_viewer.py`: builds one page; `retrace.py` calls it, and you can run it yourself
 - `make_index.py`: builds the rounds list from the pages in a folder
@@ -237,6 +230,9 @@ The pages credit these too.
 
 Each page is complete: open it straight from disk or serve it from a bucket. The date on the page is the day
 GSPro last wrote the round file (the final shot), in the local time of the PC building it.
+
+To run from source instead of using the installer, with Python 3.9 or newer: `python -m venv .venv`, then
+`.venv\Scripts\python.exe -m pip install -r requirements.txt`. `requirements.lock` holds the exact versions the installer uses.
 
 To build a page by hand with `make_viewer.py`:
 

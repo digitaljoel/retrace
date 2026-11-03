@@ -3,6 +3,7 @@
     python retrace.py check                  show what was found and what's missing
     python retrace.py watch                  keep running; build each round when it finishes
     python retrace.py build [FILE]           build one round now, finished or not
+    python retrace.py open                   show your rounds in your web browser
     python retrace.py index                  rebuild the rounds list (index.html)
     python retrace.py publish                upload new and changed pages to the bucket
     python retrace.py set KEY VALUE          change a setting (see the README)
@@ -415,6 +416,12 @@ def cmd_index(cfg, a):
     return 0
 
 
+def cmd_open(cfg, a):
+    make_index.write_index(rounds_dir(cfg))
+    os.startfile(rounds_dir(cfg) / make_index.INDEX)
+    return 0
+
+
 def cmd_publish(cfg, a):
     setup_logging(cfg)
     if not cfg["publish_to"]:
@@ -546,6 +553,7 @@ def main():
     p.add_argument("file", nargs="?", help="a saved round file (default: GSPro's current round)")
     p.add_argument("--date", help="date the round was played, YYYY-MM-DD (default: when the file was last written)")
     p.set_defaults(fn=cmd_build)
+    sub.add_parser("open").set_defaults(fn=cmd_open)
     sub.add_parser("index").set_defaults(fn=cmd_index)
     sub.add_parser("publish").set_defaults(fn=cmd_publish)
     p = sub.add_parser("set")
