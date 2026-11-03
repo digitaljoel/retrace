@@ -28,6 +28,7 @@ ALIGN = _opts.get("align")
 OSM = [d for d in _opts.get("osm", "").split(",") if d] or None   # Overpass JSON exports (out geom)
 OSM_SHIFT = _opts.get("osm-shift")
 TREES = _opts.get("trees")                                            # real trees from lidar_trees.py
+BUILDINGS = _opts.get("buildings")                                    # measured building heights from lidar_trees.py
 ALIGN_DATA = None
 rows = json.load(open(ROUND, encoding="utf-8-sig"))
 gkd = json.load(open(GKD, encoding="utf-8-sig")) if GKD != "-" and os.path.exists(GKD) else None
@@ -710,6 +711,41 @@ if not TREES:
     print("trees:", len(cand))
     tree_arr = np.stack([np.round((cand[:, 0] - x0) * 10), np.round((cand[:, 1] - z0) * 10), np.round(ty * 10), np.round(th * 10)], 1).astype(np.int16)
 
+# ---------------------------------------------------------------- buildings
+def tag_height(t):
+    """A building's height from its map tags, or a typical one- to two-storey height."""
+    try:
+        return float(re.match(r"[\d.]+", str(t["height"])).group())
+    except (KeyError, AttributeError, ValueError):
+        pass
+    try:
+        return float(re.match(r"[\d.]+", str(t["building:levels"])).group()) * 3 + 1
+    except (KeyError, AttributeError, ValueError):
+        return 3.0 if t.get("building") in ("shed", "garage", "garages", "hut", "roof", "carport") else 4.5
+
+
+buildings, measured = [], 0
+if OSM_L is not None:
+    roofs = json.load(open(BUILDINGS)) if BUILDINGS and os.path.exists(BUILDINGS) else {}
+    for t, g in F:
+        if "building" not in t or t["building"] == "no" or g.geom_type not in ("Polygon", "MultiPolygon"):
+            continue
+        g = shapely.transform(g, to_view)
+        for part in (g.geoms if g.geom_type == "MultiPolygon" else [g]):
+            b = part.bounds
+            if part.area < 12 or b[0] < x0 + 2 or b[1] < z0 + 2 or b[2] > x1 - 2 or b[3] > z1 - 2:
+                continue
+            ring = np.array(part.simplify(0.4).exterior.coords)[:-1]
+            if len(ring) < 3:
+                continue
+            ground = tri_sample(H, ring[:, 0], ring[:, 1])
+            roof = roofs.get(t["@id"])
+            measured += bool(roof)
+            h = np.clip(roof["h"] if roof else tag_height(t), 2.5, 120.0)
+            buildings.append({"p": [round(float(v), 1) for v in ring.ravel()], "b": round(float(ground.min()) - 0.5, 1),
+                              "t": round(float(np.median(ground) + h), 1)})
+    print(f"buildings: {len(buildings)} on the course's ground, {measured} with measured heights")
+
 # ---------------------------------------------------------------- tee-shot images
 images = {}
 try:
@@ -872,6 +908,7 @@ data = {
     "trees": {"n": len(cand), "xyzh": base64.b64encode(tree_arr.tobytes()).decode(), "kind": base64.b64encode(kind.tobytes()).decode(),
               "r": None if tree_r is None else base64.b64encode(np.clip(np.round(tree_r * 10), 1, 255).astype(np.uint8).tobytes()).decode(),
               "source": "lidar" if TREES else "placeholder", "credit": _opts.get("trees-credit")},
+    "buildings": {"items": buildings, "measured": measured},
     "stakes": {"red": [r1(s) for s in stakes_red], "white": [r1(s) for s in stakes_white]},
     "hazards": [[r1(xz(q)) for q in poly] for poly in hazards],
     "images": images,

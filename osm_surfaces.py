@@ -33,7 +33,7 @@ def load(paths):
             if key in seen or not e.get("tags"):
                 continue
             seen.add(key)
-            t = e["tags"]
+            t = dict(e["tags"], **{"@id": f"{e['type']}/{e['id']}"})
             if e["type"] == "node":
                 g = Point(e["lon"], e["lat"])
             elif e["type"] == "way":

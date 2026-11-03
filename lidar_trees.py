@@ -190,6 +190,42 @@ def building_mask(osm_files, shift, align, grid, crs="EPSG:6634"):
     return ndi.binary_dilation(m, iterations=int(round(2 / res))), n
 
 
+def roof_heights(osm_files, CHM, box, res, crs):
+    """Each mapped building's height, from the lidar returns inside its outline: {OSM id: {h, top, cover}}.
+    The outline is trimmed by a metre or so, since a map can sit a little off the survey and pick up the
+    ground or nearby trees. A building the survey doesn't show (built since, or mapped wrongly) is left out."""
+    import shapely
+    from PIL import Image, ImageDraw
+    from pyproj import Transformer
+    import osm_surfaces as OSF
+    to_grid = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
+    out = {}
+    H, W = CHM.shape
+    for t, g in OSF.load(osm_files):
+        if "building" not in t or t["building"] == "no" or g.geom_type not in ("Polygon", "MultiPolygon"):
+            continue
+        g = shapely.transform(g, lambda a: np.stack(to_grid.transform(a[:, 0], a[:, 1]), 1))
+        inner = g.buffer(-1.5)
+        if inner.is_empty or inner.area < 8:
+            inner = g
+        parts = inner.geoms if inner.geom_type == "MultiPolygon" else [inner]
+        i0, j0, i1, j1 = inner.bounds
+        i0, i1 = max(0, int((i0 - box[0]) / res)), min(W, int((i1 - box[0]) / res) + 2)
+        j0, j1 = max(0, int((j0 - box[1]) / res)), min(H, int((j1 - box[1]) / res) + 2)
+        if i1 - i0 < 2 or j1 - j0 < 2:
+            continue
+        img = Image.new("1", (i1 - i0, j1 - j0), 0); dr = ImageDraw.Draw(img)
+        for part in parts:
+            if part.geom_type == "Polygon":
+                dr.polygon([((x - box[0]) / res - i0, (y - box[1]) / res - j0) for x, y in part.exterior.coords], fill=1)
+        cells = CHM[j0:j1, i0:i1][np.asarray(img, dtype=bool)]
+        roof = cells[cells > 1.5]
+        cover = len(roof) / max(1, len(cells))
+        if len(roof) >= 4 and cover >= 0.5:
+            out[t["@id"]] = {"h": round(float(np.percentile(roof, 75)), 1), "top": round(float(np.percentile(roof, 98)), 1), "cover": round(cover, 2)}
+    return out
+
+
 CANOPY = "https://dataforgood-fb-data.s3.amazonaws.com/forests/v1/alsgedi_global_v6_float/chm/{}.tif"
 
 
@@ -248,6 +284,7 @@ def main():
     ap.add_argument("--ept", help="Entwine point-tile index URL (folder holding ept.json)")
     ap.add_argument("--osm", action="append", default=[]); ap.add_argument("--osm-shift")
     ap.add_argument("--out")
+    ap.add_argument("--buildings-out", help="also save each OSM building's measured height (needs --osm and --ept)")
     ap.add_argument("--density", type=float, default=2.0, help="rough density target; the index often holds more (default 2)")
     ap.add_argument("--min-height", type=float, default=3.0, help="shortest tree to keep, metres")
     ap.add_argument("--preview", help="also save a PNG of canopy heights with the trees found")
@@ -319,6 +356,10 @@ def main():
         lift = coef[0] + coef[1] * xs[None, :] + coef[2] * ys[:, None]
         CHM = np.where(CHM > 0, np.maximum(CHM - lift, 0), 0).astype(np.float64)
         CHM = np.maximum(CHM, ndi.grey_closing(CHM, size=3) * (CHM == 0))      # fill single-cell gaps
+        if a.buildings_out and a.osm:
+            roofs = roof_heights(a.osm, CHM, box, res, grid_crs)
+            json.dump(roofs, open(a.buildings_out, "w"), separators=(",", ":"))
+            print(f"measured {len(roofs)} buildings: median height {np.median([b['h'] for b in roofs.values()] or [0]):.1f} m", flush=True)
     if a.osm:
         shift = json.load(open(a.osm_shift))["shift"] if a.osm_shift else (0.0, 0.0)
         bm, nb = building_mask(a.osm, shift, al, (box[0], box[1], res, w, h), grid_crs or "EPSG:6634")

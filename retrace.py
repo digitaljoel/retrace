@@ -209,6 +209,8 @@ def viewer_args(cfg, source, course_key, out, date=None):
             args += ["--osm", str(d / "osm_golf.json"), "--osm", str(d / "osm_cover.json"), "--osm-shift", str(d / "shift.json")]
         if state.get("trees"):
             args += ["--trees", str(d / "trees.json"), "--trees-credit", state["trees"]]
+        if state.get("buildings"):
+            args += ["--buildings", str(d / "buildings.json")]
     return args
 
 

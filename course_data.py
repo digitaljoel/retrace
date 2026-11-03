@@ -187,13 +187,17 @@ def main():
             except Exception as e:
                 print(f"  terrain tiles failed: {e}", flush=True)
 
-    if state.get("aligned") and not state.get("trees"):
-        print("finding the trees", flush=True)
+    lidar = state.get("elevation") == "lidar"
+    if state.get("aligned") and (not state.get("trees") or (lidar and have_map and not state.get("buildings"))):
+        print("finding the trees and measuring the buildings", flush=True)
         trees = d / "trees.json"
-        source = ["--ept", state["survey"]] if state["elevation"] == "lidar" else ["--canopy"]
+        source = ["--ept", state["survey"]] if lidar else ["--canopy"]
         extra = sum((["--osm", p] for p in osm), []) if have_map else []
+        if lidar and have_map:
+            extra += ["--buildings-out", d / "buildings.json"]
         if run("lidar_trees.py", "--dem", dem, "--align", align, "--out", trees, *source, *extra):
-            state["trees"] = LIDAR_TREES_CREDIT if state["elevation"] == "lidar" else CANOPY_CREDIT
+            state["trees"] = LIDAR_TREES_CREDIT if lidar else CANOPY_CREDIT
+            state["buildings"] = lidar and have_map
             save()
     save()
 

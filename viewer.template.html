@@ -497,6 +497,37 @@ const seaSide = new THREE.MeshLambertMaterial({ color: '#2C6F8E', side: THREE.Do
   }
 })();
 
+// ---------------------------------------------------------------- buildings: low-poly, from their mapped outlines
+(function buildBuildings() {
+  const items = (DATA.buildings && DATA.buildings.items) || [];
+  if (!items.length) return;
+  const pos = [], col = [], c = new THREE.Color(), wall = new THREE.Color(), roof = new THREE.Color();
+  const tri = (a, b, d, color) => { for (const v of [a, b, d]) { pos.push(v[0], v[1], v[2]); col.push(color.r, color.g, color.b); } };
+  items.forEach((it, k) => {
+    const n = it.p.length / 2, ring = [];
+    for (let i = 0; i < n; i++) ring.push(new THREE.Vector2(it.p[i * 2], it.p[i * 2 + 1]));
+    wall.setHSL(0.08 + ((k * 7) % 10) * 0.005, 0.16, 0.62 + ((k * 3) % 10) * 0.012);
+    roof.setHSL(0.05 + ((k * 11) % 10) * 0.012, 0.1, 0.34 + ((k * 13) % 10) * 0.012);
+    for (let i = 0; i < n; i++) {
+      const a = ring[i], d = ring[(i + 1) % n];
+      const a0 = [a.x, it.b, a.y], a1 = [a.x, it.t, a.y], d0 = [d.x, it.b, d.y], d1 = [d.x, it.t, d.y];
+      tri(a0, a1, d1, wall); tri(a0, d1, d0, wall);
+    }
+    for (const f of THREE.ShapeUtils.triangulateShape(ring, [])) {
+      const [a, b, d] = f.map(i => ring[i]);
+      // the roof faces up, whichever way round the outline runs
+      const up = (b.y - a.y) * (d.x - a.x) - (b.x - a.x) * (d.y - a.y) > 0;
+      const A = [a.x, it.t, a.y], B = [b.x, it.t, b.y], D = [d.x, it.t, d.y];
+      if (up) tri(A, B, D, roof); else tri(A, D, B, roof);
+    }
+  });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.computeVertexNormals();
+  scene.add(new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide })));
+})();
+
 // ---------------------------------------------------------------- trees and stakes
 (function buildTrees() {
   const n = DATA.trees.n;
@@ -951,6 +982,7 @@ function renderScorecardState() {
       ? 'Shots and scores come from currentRound.dat. Without the course’s GreenKeeper file, pins are worked out from each shot’s distance to the hole and tees from where each hole was started. '
       : 'Shots and scores come from currentRound.dat; tees, pins, aim lines, penalty areas and the boundary from the course’s GreenKeeper file. ') +
     (DATA.trees.source === 'lidar' ? `Trees are found in ${DATA.trees.credit || 'the lidar point cloud'} (position, height and crown size; shapes are a guess). ` : 'Trees are placeholders. ') +
+    (DATA.buildings && DATA.buildings.items.length ? (DATA.buildings.measured ? 'Buildings use mapped outlines, with heights measured from the lidar where it shows them; their shapes are simplified. ' : 'Buildings use mapped outlines at estimated heights. ') : '') +
     'Club names are inferred from GSPro’s club numbers.';
 }
 if (T.tex) document.body.insertAdjacentHTML('beforeend', '<div class="attrib">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors · elevation ' + (T.credit || 'NOAA/USGS') + (DATA.trees.credit && !DATA.trees.credit.includes('lidar') ? ' · trees ' + DATA.trees.credit : '') + '</div>');
