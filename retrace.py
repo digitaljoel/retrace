@@ -33,7 +33,7 @@ DEFAULTS = {
     "quiet_seconds": 60,
     "idle_minutes": 30,
     "min_holes": 9,
-    "courses": {},          # course key -> file prefix in lidar/ and osm/
+    "locations": {},        # course key -> "lat,lon", for a course whose file doesn't say where it is
 }
 POLL_SECONDS = 5
 PUBLISH_RETRY_SECONDS = 300
@@ -136,26 +136,79 @@ def is_due(rec, is_current, now, cfg):
 
 
 # ---------------------------------------------------------------- building a page
+def gkd_file(cfg, course_key):
+    """The course's .GKD file, if its folder is here."""
+    course = courses_dir(cfg) / str(course_key)
+    found = [p for p in course.iterdir() if p.suffix.upper() == ".GKD"] if course.is_dir() else []
+    return found[0] if found else None
+
+
+def course_location(cfg, course_key):
+    """(lat, lon) from the settings or the course file. Fictional courses have none, or 0, 0."""
+    manual = cfg["locations"].get(course_key)
+    if manual:
+        lat, lon = str(manual).split(",")
+        return float(lat), float(lon)
+    gkd = gkd_file(cfg, course_key)
+    if gkd:
+        try:
+            g = json.loads(gkd.read_text(encoding="utf-8-sig"))
+            lat, lon = float(g["CourseLat"]), float(g["CourseLong"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+        if (lat or lon) and abs(lat) <= 90 and abs(lon) <= 180:
+            return lat, lon
+    return None
+
+
+def course_data_dir(cfg, course_key):
+    return output_dir(cfg) / "course-data" / re.sub(r"[^A-Za-z0-9_-]+", "-", str(course_key))
+
+
+def prepare_course(cfg, source, course_key):
+    """Download whatever this course's real terrain still needs. A failure only means a plainer page."""
+    where = course_location(cfg, course_key)
+    if not where:
+        log.info("%s: no location in its course file, so no real terrain", course_key)
+        return
+    gkd = gkd_file(cfg, course_key)
+    args = [sys.executable, str(HERE / "course_data.py"), "--folder", str(course_data_dir(cfg, course_key)), "--lat", str(where[0]), "--lon", str(where[1]),
+            "--round", str(source), "--gkd", str(gkd) if gkd else "-"]
+    log.info("%s: getting course data for %.5f, %.5f", course_key, *where)
+    try:
+        done = run_quietly(args, timeout=3600)
+    except subprocess.TimeoutExpired:
+        log.error("%s: course data timed out", course_key)
+        return
+    if done.stdout.strip():
+        log.info("%s", done.stdout.strip())
+    if done.returncode:
+        log.error("%s: course data failed\n%s", course_key, "\n".join(done.stderr.strip().splitlines()[-12:]))
+
+
+def course_sources(cfg, course_key):
+    """What has been downloaded for this course so far (see course_data.py)."""
+    try:
+        return json.loads((course_data_dir(cfg, course_key) / "source.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
 def viewer_args(cfg, source, course_key, out, date=None):
-    """make_viewer.py's arguments, using the course folder and any terrain files this course has."""
+    """make_viewer.py's arguments, using the course folder and whatever course data has been downloaded."""
     args = [sys.executable, str(HERE / "make_viewer.py"), "--round", str(source), "--out", str(out)]
     if date:
         args += ["--date", date]
     course = courses_dir(cfg) / str(course_key)
     if course.is_dir():
         args += ["--course", str(course)]
-    prefix = cfg["courses"].get(course_key) or re.sub(r"_GSP$", "", str(course_key), flags=re.I).lower()
-    lidar, osm = HERE / "lidar", HERE / "osm"
-    if (lidar / f"{prefix}_lidar.tif").exists():
-        args += ["--lidar", str(lidar / f"{prefix}_lidar.tif"), "--align", str(lidar / f"{prefix}_align.json")]
-        layers = [osm / f"{prefix}_{kind}.json" for kind in ("golf", "cover")]
-        layers = [p for p in layers if p.exists()]
-        for p in layers:
-            args += ["--osm", str(p)]
-        if layers:
-            args += ["--osm-shift", str(osm / f"{prefix}_shift.json")]
-        if (lidar / f"{prefix}_trees.json").exists():
-            args += ["--trees", str(lidar / f"{prefix}_trees.json")]
+    state, d = course_sources(cfg, course_key), course_data_dir(cfg, course_key)
+    if state.get("aligned"):
+        args += ["--lidar", str(d / "elevation.tif"), "--align", str(d / "align.json"), "--terrain-credit", state["credit"]]
+        if state.get("map"):
+            args += ["--osm", str(d / "osm_golf.json"), "--osm", str(d / "osm_cover.json"), "--osm-shift", str(d / "shift.json")]
+        if state.get("trees"):
+            args += ["--trees", str(d / "trees.json"), "--trees-credit", state["trees"]]
     return args
 
 
@@ -173,6 +226,8 @@ def build_page(cfg, source, course_key, round_id, date=None):
     """Build one page and refresh the index. Returns the page's path, or None if the build failed."""
     out = rounds_dir(cfg) / f"{stem_for(course_key, round_id)}.html"
     out.parent.mkdir(parents=True, exist_ok=True)
+    source = Path(source).resolve()
+    prepare_course(cfg, source, course_key)
     try:
         done = run_quietly(viewer_args(cfg, source, course_key, out, date), timeout=1200)
     except subprocess.TimeoutExpired:
@@ -369,10 +424,10 @@ def cmd_publish(cfg, a):
 
 def cmd_set(cfg, a):
     raw = load_config_file()
-    if a.key.startswith("course."):
-        raw.setdefault("courses", {})[a.key[len("course."):]] = a.value
-    elif a.key not in DEFAULTS or a.key == "courses":
-        print("unknown setting:", a.key, "\nsettings:", ", ".join(k for k in DEFAULTS if k != "courses"), "or course.<CourseKey>")
+    if a.key.startswith("location."):
+        raw.setdefault("locations", {})[a.key[len("location."):]] = a.value
+    elif a.key not in DEFAULTS or a.key == "locations":
+        print("unknown setting:", a.key, "\nsettings:", ", ".join(k for k in DEFAULTS if k != "locations"), "or location.<CourseKey>")
         return 1
     elif isinstance(DEFAULTS[a.key], int):
         raw[a.key] = int(a.value)
@@ -458,8 +513,11 @@ def cmd_check(cfg, a):
             line(None, "Latest round", f"{info['course']}, round {info['round_id']}, {info['holes']} holes" + (", all holed out" if info["all_holed"] else ""))
             has_gkd = any((cd / info["course"]).glob("*.[gG][kK][dD]")) if (cd / info["course"]).is_dir() else False
             line(has_gkd or None, "Course data for that round", "found" if has_gkd else "no .GKD file, so the page will use the shot data only")
-            terrain = any(x == "--lidar" for x in viewer_args(cfg, rf, info["course"], "x"))
-            line(True if terrain else None, "Real terrain for that course", "found" if terrain else "none (optional; see the README)")
+            where = course_location(cfg, info["course"])
+            line(True if where else None, "Course location", f"{where[0]:.5f}, {where[1]:.5f}" if where else "not known, so its page won't have real terrain")
+            state = course_sources(cfg, info["course"])
+            terrain = {"lidar": "lidar", "tiles": "worldwide terrain tiles"}.get(state.get("elevation")) if state.get("aligned") else None
+            line(None, "Real terrain", terrain or "downloads automatically when a round on this course finishes")
     line(True, "Pages go to", rounds_dir(cfg))
     target = cfg["publish_to"]
     if target:

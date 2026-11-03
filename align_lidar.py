@@ -90,14 +90,14 @@ def orient(x, z, v):
     return (b, a) if swap else (a, b)   # (east-ish, north-ish)
 
 
-def coarse_search(P, G, res):
+def coarse_search(P, G, res, variants=VARIANTS):
     """Best integer shift for each axis orientation: minimise the weighted variance of (y - ground)."""
     W, Y = P[:, 3], P[:, 1]
     Gf = np.where(np.isnan(G), np.nanmin(G) - 60.0, G).astype(np.float64)   # no-data (sea) reads as deep water
     G2 = Gf * Gf
     sw, swy, swy2 = W.sum(), (W * Y).sum(), (W * Y * Y).sum()
     out = []
-    for v in VARIANTS:
+    for v in variants:
         u, w_ = orient(P[:, 0], P[:, 2], v)
         ku = np.round((u - u.min()) / res).astype(int); kv = np.round((w_ - w_.min()) / res).astype(int)
         shape = (kv.max() + 1, ku.max() + 1)
@@ -117,14 +117,68 @@ def coarse_search(P, G, res):
     return sorted(out, key=lambda o: o["std"])
 
 
+def rigid_fit(rows, gkd, P, kinds, G, E0, N0, re, rn, crs, osm, OUT):
+    """For coarse elevation, which can't support fine rotation or scale. Every course measured so far runs
+    x east and z north at true scale, so only the position and height offset are solved. Where the map shows
+    greens, the position is then refined by matching them to the green lies, which beats 5 m terrain."""
+    ranked = coarse_search(P, G, re, [(0, 1, 1)])
+    if not ranked:
+        sys.exit("the course doesn't fit inside the elevation data")
+    best = ranked[0]
+    u, v = orient(P[:, 0], P[:, 2], best["v"])
+    W = P[:, 3]
+    cu, cv = np.average(u, weights=W), np.average(v, weights=W)
+    tE, tN = E0 + best["i"] * re - best["umin"] + cu, N0 + best["j"] * rn - best["vmin"] + cv
+    Gn = np.where(np.isnan(G), np.nanmin(G) - 60.0, G)
+    Gs = gaussian_filter(Gn, 1.5 / re)
+    at = lambda e, n: map_coordinates(Gs, [(tN + n + (v - cv) - N0) / rn, (tE + e + (u - cu) - E0) / re], order=1, mode="nearest")
+
+    def var(e, n):
+        r = P[:, 1] - at(e, n)
+        return np.average((r - np.average(r, weights=W)) ** 2, weights=W)
+    steps = np.arange(-re, re + 0.01, 1.0)
+    _, de, dn = min((var(a, b), a, b) for a in steps for b in steps)
+    tE, tN = tE + de, tN + dn
+    out = {"crs": crs, "orientation": {"swap": 0, "sx": 1, "sz": 1}, "tE": tE, "tN": tN, "cu": cu, "cv": cv, "theta": 0.0, "scale": 1.0,
+           "hScale": 1.0, "hOffset": 0.0, "coarseSpread": best["std"], "coarseRunnerUp": best["runner"], "quality": {"greenLies": 0, "greenInside": 0.0},
+           "note": "E,N = (tE,tN) + (u,v) - (cu,cv), with u = GSPro x and v = GSPro z; GSPro y = elevation + hOffset"}
+    if osm:
+        import shapely
+        import osm_surfaces as OSF
+        feats = OSF.load(osm)
+        L = OSF.layers(OSF.to_gspro(feats, out))
+        checks = OSF.course_checks(rows, gkd, L)
+        lies = checks["green lies"][0]
+        if not L["green"].is_empty and len(lies):
+            dx, dz = OSF.solve_shift(None, list(checks.values()), span=40)
+            out["tE"], out["tN"] = tE - dx, tN - dz     # the map moves onto the course, and the elevation with it
+            print(f"map shift {dx:+.2f}, {dz:+.2f} m")
+            near = shapely.distance(OSF.layers(OSF.to_gspro(feats, out))["green"], shapely.points(lies))
+            out["quality"] = {"greenLies": len(lies), "greenInside": float(np.mean(near <= 3.0))}
+    de, dn = out["tE"] - tE, out["tN"] - tN
+    r = P[:, 1] - at(de, dn)
+    out["hOffset"] = float(np.median(r))
+    r = r - out["hOffset"]
+    out["fit"] = {kd: {"n": int((kinds == kd).sum()), "median_abs_m": round(float(np.median(np.abs(r[kinds == kd]))), 3),
+                       "p90_abs_m": round(float(np.percentile(np.abs(r[kinds == kd]), 90)), 3)} for kd in np.unique(kinds)}
+    json.dump(out, open(OUT, "w"), indent=1)
+    print(f"spread {best['std']:.2f} m (next-best placement {best['runner']:.2f} m); {out['quality']}; balls within {out['fit']['ball']['median_abs_m']} m")
+    print("wrote", OUT)
+
+
 def main():
-    ROUND, GKD, OUT, *DEMS = sys.argv[1:]
+    args = sys.argv[1:]
+    rigid = "--rigid" in args
+    osm = [x[len("--osm="):] for x in args if x.startswith("--osm=")]
+    ROUND, GKD, OUT, *DEMS = [x for x in args if not x.startswith("--")]
     rows = json.load(open(ROUND, encoding="utf-8-sig"))
     gkd = json.load(open(GKD, encoding="utf-8-sig")) if GKD != "-" else None
     P, kinds = ground_points(rows, gkd)
     print(f"{len(P)} ground points: " + ", ".join(f"{k} {int((kinds == k).sum())}" for k in np.unique(kinds)))
     G, E0, N0, re, rn, crs = load_dem(DEMS)
     print(f"DEM {G.shape[1]} x {G.shape[0]} cells at {re:g} m ({crs}); {np.isnan(G).mean() * 100:.0f}% no data")
+    if rigid:
+        return rigid_fit(rows, gkd, P, kinds, G, E0, N0, re, rn, crs, osm, OUT)
 
     k = max(1, int(round(COARSE / re)))
     Gc = block_mean(G, k); rc = re * k

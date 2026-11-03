@@ -41,7 +41,7 @@ os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
 def overpass(q):
     url = "https://overpass-api.de/api/interpreter?" + urllib.parse.urlencode({"data": f"[out:json][timeout:120];({q});out geom;"})
     # Overpass turns away requests that don't say who they are, and is often busy: back off and retry
-    req = urllib.request.Request(url, headers={"User-Agent": "gspro-round-viewer/0.1 (personal golf replay viewer)", "Accept": "application/json"})
+    req = urllib.request.Request(url, headers={"User-Agent": "retrace/0.1 (golf replay viewer)", "Accept": "application/json"})
     for attempt in range(5):
         try:
             with urllib.request.urlopen(req, timeout=200) as r:

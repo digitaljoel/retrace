@@ -33,6 +33,8 @@ ap.add_argument("--align", help="alignment file for --lidar (created if missing)
 ap.add_argument("--osm", action="append", help="OpenStreetMap export from fetch_osm.py (repeat for each file)")
 ap.add_argument("--osm-shift", help="shift file for --osm (created if missing)")
 ap.add_argument("--trees", help="real trees from lidar_trees.py")
+ap.add_argument("--terrain-credit", help="where the elevation came from, for the page's credits")
+ap.add_argument("--trees-credit", help="where the trees came from, for the page's credits")
 a = ap.parse_args()
 
 gkd, imgs = "-", "-"
@@ -49,6 +51,10 @@ if a.trees:
     extra += ["--trees=" + a.trees]
 if a.osm:
     extra += ["--osm=" + ",".join(a.osm), "--osm-shift=" + (a.osm_shift or os.path.splitext(a.osm[0])[0].replace("_golf", "") + "_shift.json")]
+if a.terrain_credit:
+    extra += ["--terrain-credit=" + a.terrain_credit]
+if a.trees_credit:
+    extra += ["--trees-credit=" + a.trees_credit]
 subprocess.run([sys.executable, os.path.join(here, "build_round.py"), a.round, gkd, imgs, tmp] + extra, check=True)
 data = open(tmp, encoding="utf-8").read()
 meta = json.loads(data)

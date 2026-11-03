@@ -942,16 +942,18 @@ function renderScorecardState() {
 {
   const osm = '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
   $('s-note').innerHTML = (T.source === 'lidar'
-      ? '<b>Real ground.</b> Elevation from public NOAA/USGS lidar, lined up to GSPro’s course to within a few centimetres. '
+      ? (T.credit && !T.credit.includes('lidar')
+        ? `<b>Real ground.</b> Elevation from ${T.credit}, lined up to GSPro’s course and fitted to the recorded ball heights. `
+        : `<b>Real ground.</b> Elevation from ${T.credit || 'public NOAA/USGS lidar'}, lined up to GSPro’s course to within a few centimetres. `)
       : '<b>Sample render.</b> The ground is a placeholder shaped to recorded ball heights. ') +
     (T.tex ? `Fairways, greens, tees, bunkers, water, paths and buildings © ${osm} contributors. ` : 'Fairway and green shapes are approximations. ') +
     (C.gkd === false
       ? 'Shots and scores come from currentRound.dat. Without the course’s GreenKeeper file, pins are worked out from each shot’s distance to the hole and tees from where each hole was started. '
       : 'Shots and scores come from currentRound.dat; tees, pins, aim lines, penalty areas and the boundary from the course’s GreenKeeper file. ') +
-    (DATA.trees.source === 'lidar' ? 'Trees are found in the lidar point cloud (position, height and crown size; shapes are a guess). ' : 'Trees are placeholders. ') +
+    (DATA.trees.source === 'lidar' ? `Trees are found in ${DATA.trees.credit || 'the lidar point cloud'} (position, height and crown size; shapes are a guess). ` : 'Trees are placeholders. ') +
     'Club names are inferred from GSPro’s club numbers.';
 }
-if (T.tex) document.body.insertAdjacentHTML('beforeend', '<div class="attrib">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors · elevation NOAA/USGS</div>');
+if (T.tex) document.body.insertAdjacentHTML('beforeend', '<div class="attrib">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors · elevation ' + (T.credit || 'NOAA/USGS') + (DATA.trees.credit && !DATA.trees.credit.includes('lidar') ? ' · trees ' + DATA.trees.credit : '') + '</div>');
 const PLAYED = (() => {
   const m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(DATA.playedDay || '');
   const d = m ? new Date(+m[1], m[2] - 1, +m[3]) : DATA.played ? new Date(DATA.played) : null;

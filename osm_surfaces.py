@@ -118,12 +118,13 @@ def layers(F):
     }
 
 
-def solve_shift(F, checks):
+def solve_shift(F, checks, span=15):
     """Best (dx, dz) to move OSM onto the course: checks are (points (N,2), layer geometry, weight) where every
-    point should sit inside its layer (pins in greens, ball lies in the matching surface)."""
+    point should sit inside its layer (pins in greens, ball lies in the matching surface). span: metres to search."""
     def score(dx, dz):
-        return sum(w * np.mean(np.minimum(shapely.distance(geom, shapely.points(pts - (dx, dz))), 10)) for pts, geom, w in checks if len(pts))
-    _, bx, bz = min((score(dx, dz), dx, dz) for dx in np.arange(-15, 15.1, 1.0) for dz in np.arange(-15, 15.1, 1.0))
+        return sum(w * np.mean(np.minimum(shapely.distance(geom, shapely.points(pts - (dx, dz))), 10)) for pts, geom, w in checks if len(pts) and not geom.is_empty)
+    grid = np.arange(-span, span + 0.1, 1.0)
+    _, bx, bz = min((score(dx, dz), dx, dz) for dx in grid for dz in grid)
     s, bx, bz = min((score(dx, dz), dx, dz) for dx in np.arange(bx - 1.5, bx + 1.51, 0.25) for dz in np.arange(bz - 1.5, bz + 1.51, 0.25))
     return float(bx), float(bz)
 

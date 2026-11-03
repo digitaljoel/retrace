@@ -18,7 +18,7 @@ different projection from the elevation model (USGS's are in web-map coordinates
 builds the elevation model itself from the survey's ground points (1 m, UTM metres), for courses with
 no separate elevation download; then run align and trees against it as usual.
 """
-import argparse, io, json, math, sys, time, urllib.request
+import argparse, io, json, math, os, sys, time, urllib.request
 import concurrent.futures as cf
 import numpy as np
 from scipy import ndimage as ndi
@@ -190,23 +190,73 @@ def building_mask(osm_files, shift, align, grid, crs="EPSG:6634"):
     return ndi.binary_dilation(m, iterations=int(round(2 / res))), n
 
 
+CANOPY = "https://dataforgood-fb-data.s3.amazonaws.com/forests/v1/alsgedi_global_v6_float/chm/{}.tif"
+
+
+def canopy_heights(box, crs, w, h, res):
+    """Meta and WRI's worldwide 1 m canopy height map (CC BY 4.0), resampled onto the elevation model's grid.
+    Its tiles are named by quadkey at zoom 9, and a read fetches only the rows it needs."""
+    import rasterio
+    from pyproj import Transformer
+    from rasterio.enums import Resampling
+    from rasterio.transform import from_origin
+    from rasterio.warp import reproject
+    from rasterio.windows import from_bounds
+    os.environ.setdefault("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
+    to_ll = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+    lons, lats = to_ll.transform([box[0], box[2], box[0], box[2]], [box[1], box[1], box[3], box[3]])
+    n = 2 ** 9
+    tx = lambda lo: int((lo + 180) / 360 * n)
+    ty = lambda la: int((1 - math.asinh(math.tan(math.radians(la))) / math.pi) / 2 * n)
+    quadkey = lambda x, y: "".join(str(((x >> b) & 1) + 2 * ((y >> b) & 1)) for b in range(8, -1, -1))
+    CHM = np.zeros((h, w), np.float32)
+    dst_tr = from_origin(box[0], box[3], res, res)
+    merc = Transformer.from_crs(crs, "EPSG:3857", always_xy=True)
+    mx, my = merc.transform([box[0], box[2], box[0], box[2]], [box[1], box[1], box[3], box[3]])
+    found = 0
+    for y in range(ty(max(lats)), ty(min(lats)) + 1):
+        for x in range(tx(min(lons)), tx(max(lons)) + 1):
+            try:
+                src = rasterio.open(CANOPY.format(quadkey(x, y)))
+            except rasterio.errors.RasterioIOError:
+                continue   # no tile here, e.g. open sea
+            with src:
+                win = from_bounds(min(mx), min(my), max(mx), max(my), src.transform).intersection(rasterio.windows.Window(0, 0, src.width, src.height))
+                win = win.round_offsets().round_lengths()
+                if win.width < 1 or win.height < 1:
+                    continue
+                print(f"canopy tile {quadkey(x, y)}: reading {win.width} x {win.height}", flush=True)
+                A = src.read(1, window=win).astype(np.float32)
+                A[A > 90] = 0              # no-data
+                part = np.zeros((h, w), np.float32)
+                reproject(A, part, src_transform=src.window_transform(win), src_crs=src.crs, dst_transform=dst_tr, dst_crs=crs, resampling=Resampling.bilinear)
+                CHM = np.maximum(CHM, part)
+                found += 1
+    if not found:
+        raise RuntimeError("no canopy height tiles cover this course")
+    return CHM[::-1].astype(np.float64)    # row 0 = south
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--canopy", action="store_true", help="use the worldwide canopy height map instead of a survey's point cloud")
     ap.add_argument("--dem"); ap.add_argument("--align")
     ap.add_argument("--make-dem", help="build an elevation model from the survey's ground points instead (needs --lat/--lon)")
     ap.add_argument("--lat", type=float); ap.add_argument("--lon", type=float)
     ap.add_argument("--half-width", type=float, default=1800); ap.add_argument("--half-height", type=float, default=1400)
     ap.add_argument("--res", type=float, default=1.0)
-    ap.add_argument("--ept", required=True, help="Entwine point-tile index URL (folder holding ept.json)")
+    ap.add_argument("--ept", help="Entwine point-tile index URL (folder holding ept.json)")
     ap.add_argument("--osm", action="append", default=[]); ap.add_argument("--osm-shift")
     ap.add_argument("--out")
     ap.add_argument("--density", type=float, default=2.0, help="rough density target; the index often holds more (default 2)")
     ap.add_argument("--min-height", type=float, default=3.0, help="shortest tree to keep, metres")
     ap.add_argument("--preview", help="also save a PNG of canopy heights with the trees found")
     a = ap.parse_args()
+    if not (a.ept or a.canopy):
+        ap.error("give --ept or --canopy")
     if a.make_dem:
-        if a.lat is None or a.lon is None:
-            ap.error("--make-dem needs --lat and --lon")
+        if a.lat is None or a.lon is None or not a.ept:
+            ap.error("--make-dem needs --ept, --lat and --lon")
         return make_dem(a)
     if not (a.dem and a.align and a.out):
         ap.error("--dem, --align and --out are needed to find trees")
@@ -226,45 +276,49 @@ def main():
     Dtop = ndi.maximum_filter(D, size=int(round(3.5 / abs(tr.a))) | 1)
     top_at = lambda E, N: sample(Dtop, E, N)
 
-    # how deep to read: each tile holds about 128 x 128 points across its width
-    s_crs, sbox, to_grid = survey_reader(a.ept, grid_crs, box)
-    want = depth_for(a.ept, sbox, a.density)
-    keys, W = ept_nodes(a.ept, sbox, want)
-    print(f"reading {len(keys)} point tiles down to depth {want}", flush=True)
-    # canopy height model: the tallest non-ground return in each 1 m cell, above the ground under it
+    # canopy height model on a 1 m grid
     res = 1.0
     w = int((box[2] - box[0]) / res); h = int((box[3] - box[1]) / res)
-    CHM = np.zeros((h, w), np.float32); dzs = []
-    rng = np.random.default_rng(3)
+    if a.canopy:
+        CHM = canopy_heights(box, grid_crs, w, h, res)
+    else:
+        # from the point cloud: the tallest non-ground return in each cell, above the ground under it.
+        # how deep to read: each tile holds about 128 x 128 points across its width
+        s_crs, sbox, to_grid = survey_reader(a.ept, grid_crs, box)
+        want = depth_for(a.ept, sbox, a.density)
+        keys, W = ept_nodes(a.ept, sbox, want)
+        print(f"reading {len(keys)} point tiles down to depth {want}", flush=True)
+        CHM = np.zeros((h, w), np.float32); dzs = []
+        rng = np.random.default_rng(3)
 
-    def consume(E, N, Z, C):
-        g = C == 2
-        if g.any():   # a sample of ground points, to check the two surveys' heights agree
-            pick = rng.choice(np.flatnonzero(g), min(400, int(g.sum())), replace=False)
-            dzs.append(np.c_[E[pick], N[pick], Z[pick] - ground_at(E[pick], N[pick])])
-        v = (C == 1) | (C == 0)
-        if not v.any():
-            return
-        Hc = Z[v] - top_at(E[v], N[v])
-        ok = (Hc > 0.5) & (Hc < 70)
-        ix = ((E[v][ok] - box[0]) / res).astype(int).clip(0, w - 1); iy = ((N[v][ok] - box[1]) / res).astype(int).clip(0, h - 1)
-        np.maximum.at(CHM, (iy, ix), Hc[ok].astype(np.float32))
-    t0 = time.time()
-    n_pts = read_points(a.ept, keys, sbox, consume, to_grid)
-    area = (box[2] - box[0]) * (box[3] - box[1])
-    print(f"{n_pts:,} points ({n_pts / area:.1f} per m2) in {time.time() - t0:.0f} s", flush=True)
-    # the point cloud and the elevation model can use different height references (ellipsoid vs geoid):
-    # fit the gap as a gently tilted plane from the ground points and take it off
-    G_ = np.concatenate(dzs); G_ = G_[np.abs(G_[:, 2] - np.median(G_[:, 2])) < 3]
-    Am = np.c_[np.ones(len(G_)), G_[:, 0] - box[0], G_[:, 1] - box[1]]
-    coef = np.linalg.lstsq(Am, G_[:, 2], rcond=None)[0]
-    resid = G_[:, 2] - Am @ coef
-    print(f"ground points sit {np.median(G_[:, 2]):+.2f} m from the elevation model; after a tilted-plane fit, "
-          f"median gap {np.median(np.abs(resid)):.2f} m")
-    xs = box[0] + (np.arange(w) + 0.5) * res - box[0]; ys = box[1] + (np.arange(h) + 0.5) * res - box[1]
-    lift = coef[0] + coef[1] * xs[None, :] + coef[2] * ys[:, None]
-    CHM = np.where(CHM > 0, np.maximum(CHM - lift, 0), 0).astype(np.float64)
-    CHM = np.maximum(CHM, ndi.grey_closing(CHM, size=3) * (CHM == 0))      # fill single-cell gaps
+        def consume(E, N, Z, C):
+            g = C == 2
+            if g.any():   # a sample of ground points, to check the two surveys' heights agree
+                pick = rng.choice(np.flatnonzero(g), min(400, int(g.sum())), replace=False)
+                dzs.append(np.c_[E[pick], N[pick], Z[pick] - ground_at(E[pick], N[pick])])
+            v = (C == 1) | (C == 0)
+            if not v.any():
+                return
+            Hc = Z[v] - top_at(E[v], N[v])
+            ok = (Hc > 0.5) & (Hc < 70)
+            ix = ((E[v][ok] - box[0]) / res).astype(int).clip(0, w - 1); iy = ((N[v][ok] - box[1]) / res).astype(int).clip(0, h - 1)
+            np.maximum.at(CHM, (iy, ix), Hc[ok].astype(np.float32))
+        t0 = time.time()
+        n_pts = read_points(a.ept, keys, sbox, consume, to_grid)
+        area = (box[2] - box[0]) * (box[3] - box[1])
+        print(f"{n_pts:,} points ({n_pts / area:.1f} per m2) in {time.time() - t0:.0f} s", flush=True)
+        # the point cloud and the elevation model can use different height references (ellipsoid vs geoid):
+        # fit the gap as a gently tilted plane from the ground points and take it off
+        G_ = np.concatenate(dzs); G_ = G_[np.abs(G_[:, 2] - np.median(G_[:, 2])) < 3]
+        Am = np.c_[np.ones(len(G_)), G_[:, 0] - box[0], G_[:, 1] - box[1]]
+        coef = np.linalg.lstsq(Am, G_[:, 2], rcond=None)[0]
+        resid = G_[:, 2] - Am @ coef
+        print(f"ground points sit {np.median(G_[:, 2]):+.2f} m from the elevation model; after a tilted-plane fit, "
+              f"median gap {np.median(np.abs(resid)):.2f} m")
+        xs = box[0] + (np.arange(w) + 0.5) * res - box[0]; ys = box[1] + (np.arange(h) + 0.5) * res - box[1]
+        lift = coef[0] + coef[1] * xs[None, :] + coef[2] * ys[:, None]
+        CHM = np.where(CHM > 0, np.maximum(CHM - lift, 0), 0).astype(np.float64)
+        CHM = np.maximum(CHM, ndi.grey_closing(CHM, size=3) * (CHM == 0))      # fill single-cell gaps
     if a.osm:
         shift = json.load(open(a.osm_shift))["shift"] if a.osm_shift else (0.0, 0.0)
         bm, nb = building_mask(a.osm, shift, al, (box[0], box[1], res, w, h), grid_crs or "EPSG:6634")
@@ -297,7 +351,8 @@ def main():
     k6 = int(round(6 / abs(tr.a))) | 1
     relief = sample(ndi.maximum_filter(D, size=k6) - ndi.minimum_filter(np.where(D < -900, 1e4, D), size=k6), Ec, Nc)
     # nothing standing in the surf or at the waterline, nor on a cliff (ground falling 8+ m within 6 m)
-    keep = (top_h >= a.min_height) & (base > 3.0) & (relief < 8.0)
+    coastal = D.min() < -900                                   # low-lying land away from any sea keeps its trees
+    keep = (top_h >= a.min_height) & ((base > 3.0) | (not coastal)) & (relief < 8.0)
     Et, Nt = Ec[keep], Nc[keep]
     ht, rt = top_h[keep], r[keep]
     kind = ((ht >= 10) & (rt <= 0.26 * ht)).astype(int)        # 1 = tall and narrow (columnar), 0 = spreading

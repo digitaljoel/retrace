@@ -189,57 +189,37 @@ restarts. Please include the error if you open an issue, but look it over first 
 **Uninstall.** Run `retrace.py stop` and `retrace.py startup off`, then delete the Retrace folder and
 `C:\Users\<you>\Retrace`. Delete any bucket you made from your cloud account.
 
-## Real terrain, greens and trees (optional)
+## Real terrain, greens and trees
 
-Out of the box, the ground is fitted to your ball positions and the trees are placeholders. For real-world
-courses you can do far better using public lidar surveys and OpenStreetMap. It takes some manual work for each
-course, but it only needs doing once. Retrace uses these files automatically when it finds them:
+You don't need to set anything up. The first time you finish a round on a real-world course, Retrace reads the
+course's location from its course file and downloads what it needs, once per course. Later rounds there reuse it
+and build in seconds. In the US that means reading about 2 GB of lidar over 5 to 10 minutes, so keep it in mind if
+your internet has a data cap, though only about 30 MB is kept. Elsewhere the download is much smaller.
 
-| File | Contents |
-|---|---|
-| `lidar/<name>_lidar.tif` | Elevation model |
-| `lidar/<name>_align.json` | How the survey lines up with GSPro (created for you) |
-| `lidar/<name>_trees.json` | Real trees (optional) |
-| `osm/<name>_golf.json`, `osm/<name>_cover.json` | Fairways, greens, bunkers and more (optional) |
-| `osm/<name>_shift.json` | How the map lines up with the course (created for you) |
+| | In the United States | Everywhere else |
+|---|---|---|
+| **Ground** | Public USGS lidar, accurate to centimetres | 5 m worldwide terrain, fitted to your ball heights. It's right where you played, but rougher away from your shots |
+| **Trees** | Found in the lidar | Meta and WRI's worldwide 1 m canopy height map, which finds fewer trees |
+| **Fairways, greens, bunkers, water** | OpenStreetMap | OpenStreetMap |
 
-`<name>` is the course key that `retrace.py check` shows, in lower case and without `_GSP`, so `HobbleCreek_GSP`
-becomes `hobblecreek`. To use a different name: `retrace.py set course.YorkGC_GSP york`.
+Places USGS doesn't cover, even within the US, use the worldwide sources. Surface shapes are only as good as the
+course's mapping in OpenStreetMap, so holes nobody has traced keep approximate shapes.
 
-These commands use the same Python packages you installed, so run them with `.venv\Scripts\python.exe`.
+Retrace checks the terrain against where your balls actually landed before using it. If it doesn't fit, or the
+course is fictional and has no location, you still get a full replay, with placeholder ground and trees. If a
+download fails, for example with no internet, that round's page gets whatever worked, and the next round on the
+course tries again. Everything is kept in `C:\Users\<you>\Retrace\course-data`; delete a course's folder there to
+download it fresh.
 
-### A course in the United States
+If a course file has no location, you can give it one, using the course key `check` shows:
 
-USGS publishes surveys as streamable point clouds. Find the survey covering your course in
-[usgs-lidar's `boundaries/resources.geojson`](https://github.com/hobuinc/usgs-lidar), and the course's latitude
-and longitude from OpenStreetMap. Then, for example:
+```powershell
+.venv\Scripts\python.exe retrace.py set location.Some_Course_GSP "40.1608,-111.5121"
+```
 
-    python lidar_trees.py --make-dem lidar/hobblecreek_lidar.tif --lat 40.16083 --lon -111.51211 \
-        --ept https://usgs-lidar-public.s3.us-west-2.amazonaws.com/USGS_LPC_UT_Central_QL1_B2_2018_LAS_2019
-    python fetch_osm.py --lat 40.16083 --lon -111.51211 --out osm/hobblecreek
-
-    # build once, which solves and saves the alignment
-    python retrace.py build path/to/round.dat
-
-    # now find the trees, then build again with them
-    python lidar_trees.py --dem lidar/hobblecreek_lidar.tif --align lidar/hobblecreek_align.json \
-        --ept https://usgs-lidar-public.s3.us-west-2.amazonaws.com/USGS_LPC_UT_Central_QL1_B2_2018_LAS_2019 \
-        --osm osm/hobblecreek_cover.json --osm-shift osm/hobblecreek_shift.json --out lidar/hobblecreek_trees.json
-    python retrace.py build path/to/round.dat
-
-If you have the course folder, `fetch_osm.py --course path/to/Courses/<Course_GSP>` reads the location for you.
-
-### A separate elevation download
-
-Some surveys publish their elevation model separately. Manele's is from NOAA Digital Coast (dataset 10335,
-0.5 m, public domain), cropped to the course and saved as `lidar/manele_lidar.tif`. Its trees then come from the
-survey's point cloud:
-
-    python lidar_trees.py --dem lidar/manele_lidar.tif --align lidar/manele_align.json \
-        --ept https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/entwine/geoid12b/10331 \
-        --osm osm/manele_cover.json --osm-shift osm/manele_shift.json --out lidar/manele_trees.json
-
-Map data (c) OpenStreetMap contributors (ODbL); the page credits it.
+Credits: map data (c) OpenStreetMap contributors (ODbL); lidar from the USGS 3D Elevation Program; terrain tiles
+from Mapzen and the AWS Terrain Tiles dataset; canopy heights from Meta and the World Resources Institute (CC BY 4.0).
+The pages credit these too.
 
 ## How it works
 
@@ -252,6 +232,7 @@ Map data (c) OpenStreetMap contributors (ODbL); the page credits it.
 - `fetch_osm.py`: downloads a course's OpenStreetMap features (fairways, greens, bunkers, paths...)
 - `osm_surfaces.py`: turns those into surfaces in GSPro's coordinates (run for you by the build)
 - `lidar_trees.py`: finds the real trees in the lidar point cloud
+- `course_data.py`: downloads a course's map, elevation and trees, and solves its alignment
 - `viewer.template.html`: the page; the round data is inlined into it
 
 Each page is complete: open it straight from disk or serve it from a bucket. The date on the page is the day
@@ -283,7 +264,7 @@ that browser. Otherwise the page follows the system setting.
   Press 1-4 on a hole to preview them.
 
 ### A course with no course folder
-Everything also works from the round file alone. The course name comes from OpenStreetMap, the pins are worked
+Everything also works from the round file alone, given the course's location (see `location.<key>` above). The course name comes from OpenStreetMap, the pins are worked
 out from each shot's distance to the pin, the alignment uses the ball positions alone, and there are no tee-shot
 images. USGS stores its surveys in web-map coordinates; the scripts reproject them to UTM metres.
 
