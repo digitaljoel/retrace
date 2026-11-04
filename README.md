@@ -28,14 +28,15 @@ on the 18th, double-click **Retrace Rounds** on your desktop to see your rounds 
 To update, download the new zip and run **Install.bat** again; your rounds and settings stay. To remove Retrace, run
 **Uninstall.bat** in `%LOCALAPPDATA%\Programs\Retrace`. Your rounds stay in `C:\Users\<you>\Retrace` until you delete them.
 
-If the setup window reports a problem finding GSPro, see the next section.
+Setup finds your GSPro courses on its own, even if GSPro isn't in the usual place. If it can't, it asks you for the
+folder; you can also skip that and see the next section.
 
 ## Where Retrace looks for GSPro
 
 | What | Where it looks | To change it |
 |---|---|---|
 | The round file | `C:\Users\<you>\AppData\LocalLow\GSPro\GSPro\currentRound.dat`, then any `currentRound.dat` elsewhere in `LocalLow` | `retrace.py set round_file "D:/path/to/currentRound.dat"` |
-| GSPro's courses | `C:\GSProV1\Core\GSP\Courses`, then the same path on drives D to H | `retrace.py set courses_dir "D:/path/to/Courses"` |
+| GSPro's courses | `C:\GSProV1\Core\GSP\Courses`, then the same path on your other hard drives, then the folders named in GSPro's log files, then a search of your hard drives lasting up to 30 seconds | `retrace.py find-courses "D:/path/to/Courses"` |
 | Where pages go | `C:\Users\<you>\Retrace\rounds` | `retrace.py set output_dir "D:/path/to/Retrace"` |
 
 `AppData` is a hidden folder. To find it, paste `%USERPROFILE%\AppData\LocalLow` into File Explorer's address
@@ -161,6 +162,8 @@ To restart the watcher: `.venv\Scripts\python.exe retrace.py stop`, then `.venv\
 | `retrace.py build [FILE] [--date YYYY-MM-DD]` | Builds one round now, finished or not (default: the current round) |
 | `retrace.py index` | Rebuilds the rounds list from the pages in the folder |
 | `retrace.py publish` | Uploads anything new or changed |
+| `retrace.py merge ROUND ROUND` | Joins two saved rounds into one page, such as when a restart made GSPro split a round in two |
+| `retrace.py find-courses [FOLDER]` | Finds GSPro's courses if Retrace doesn't know where they are, or looks in the folder you give it, and remembers the result |
 | `retrace.py set SETTING VALUE` | Changes a setting; settings are kept in `config.json` |
 
 ## Troubleshooting
@@ -171,6 +174,10 @@ upload and error.
 
 **The round file isn't found, but you've played.** Search `LocalLow` for `currentRound.dat` and give Retrace
 the path with `set round_file`.
+
+**A round got split in two.** If your PC restarts mid-round, GSPro can carry on under a new round number. Join the
+parts with `retrace.py merge 126 127`, using the numbers from `check` or the file names in `saved`. If a hole is in
+both parts, the one that finished it is used.
 
 **The page has few course details.** "No .GKD file" in `check` means Retrace couldn't find that course's folder,
 so the page is built from shot data alone. Check `courses_dir`, then rebuild the round from `saved`.

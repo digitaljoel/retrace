@@ -7,6 +7,8 @@
     python retrace.py index                  rebuild the rounds list (index.html)
     python retrace.py publish                upload new and changed pages to the bucket
     python retrace.py set KEY VALUE          change a setting (see the README)
+    python retrace.py merge ROUND ROUND      join a round that GSPro split in two
+    python retrace.py find-courses [FOLDER]  find GSPro's courses, on this PC or in that folder
     python retrace.py startup on|off         start the watcher when you sign in to Windows
     python retrace.py stop                   stop a running watcher
 
@@ -61,6 +63,14 @@ def round_file(cfg):
     return found[0] if found else usual
 
 
+def run_me(*args):
+    """Commands to show people, which work in both cmd.exe and PowerShell. "python" usually isn't on their PATH,
+    because the installer keeps its Python private, and a quoted program path would need "&" in PowerShell only."""
+    exe = Path(sys.executable)
+    python = exe.relative_to(HERE) if exe.is_relative_to(HERE) else exe
+    return f'cd "{HERE}"\n       ' + " ".join([str(python), "retrace.py", *args])
+
+
 def courses_dir(cfg):
     if cfg["courses_dir"]:
         return Path(cfg["courses_dir"])
@@ -69,6 +79,138 @@ def courses_dir(cfg):
         if p.is_dir():
             return p
     return Path("C:/GSProV1/Core/GSP/Courses")
+
+
+# ---------------------------------------------------------------- finding GSPro's courses, wherever they are
+RESTART_NOTE = "Retrace is running in the background and will use this after it restarts: run Install.bat again, or sign out and back in."
+SEARCH_SECONDS = 30
+SEARCH_DEPTH = 6        # deep enough for D:\Games\Golf\GSPro\Core\GSP\Courses
+SKIP_DIRS = {"windows", "appdata", "programdata", "node_modules", "system volume information", "recovery", "perflogs"}
+
+
+def course_count(folder):
+    """How many courses a folder holds: its subfolders with a .GKD file in them."""
+    count = 0
+    try:
+        for entry in os.scandir(folder):
+            if entry.is_dir() and any(True for _ in Path(entry.path).glob("*.[gG][kK][dD]")):
+                count += 1
+    except OSError:
+        pass
+    return count
+
+
+def fixed_drives():
+    """Local hard drives only: asking a network or removable drive can hang, or ask for a disc."""
+    try:
+        import ctypes
+        kernel = ctypes.windll.kernel32
+        return [f"{d}:\\" for d in string.ascii_uppercase if kernel.GetDriveTypeW(f"{d}:\\") == 3]
+    except (AttributeError, OSError):
+        return [f"{d}:\\" for d in "CDEFGH" if Path(f"{d}:\\").is_dir()]
+
+
+def courses_from_path(text):
+    """The Courses folder implied by a path that GSPro wrote down, if it implies one."""
+    parts = [p for p in re.split(r"[\\/]+", text) if p]
+    for i, part in enumerate(parts):
+        if part.lower() == "core" and [p.lower() for p in parts[i + 1:i + 2]] == ["gsp"]:
+            return Path(parts[0] + "\\", *parts[1:i], "Core", "GSP", "Courses")
+        if "courses" in part.lower():
+            return Path(parts[0] + "\\", *parts[1:i + 1])
+    return None
+
+
+def courses_from_gspro_files(cfg):
+    """Unity games log where they run from, and GSPro keeps its logs and settings next to the round file."""
+    found = []
+    try:
+        files = list(round_file(cfg).parent.iterdir())
+    except OSError:
+        return found
+    for f in files:
+        try:
+            if f.suffix.lower() not in (".log", ".txt", ".json", ".cfg", ".ini", ".xml") or f.stat().st_size > 5_000_000:
+                continue
+            text = f.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for path in re.findall(r"[A-Za-z]:[\\/]+[^\"'<>|\r\n*?]+", text):
+            p = courses_from_path(path)
+            if p is not None and p not in found:
+                found.append(p)
+    return found
+
+
+def walk_for_courses(roots):
+    """Yields likely Courses folders under the roots, shallowest first, until time or depth runs out."""
+    deadline = time.monotonic() + SEARCH_SECONDS
+    level = [Path(r) for r in roots]
+    for _ in range(SEARCH_DEPTH + 1):
+        below = []
+        for folder in level:
+            if time.monotonic() > deadline:
+                log.info("stopped searching for courses after %d seconds", SEARCH_SECONDS)
+                return
+            try:
+                entries = list(os.scandir(folder))
+            except OSError:
+                continue
+            for e in entries:
+                try:
+                    if not e.is_dir(follow_symlinks=False) or e.name.startswith(("$", ".")) or e.name.lower() in SKIP_DIRS:
+                        continue
+                except OSError:
+                    continue
+                if "course" in e.name.lower() and course_count(e.path):
+                    yield Path(e.path)      # the courses are inside, so there's no need to look further down
+                else:
+                    below.append(e.path)
+        level = below
+
+
+def find_courses(cfg, within=None):
+    """The best Courses folder: a look in the likely places first, then a time-limited search of the hard drives.
+    If there are several (a backup, say), the one holding the last course played wins, then the one with most courses."""
+    played = None
+    try:
+        rows = parse_rounds_file(round_file(cfg).read_bytes())
+        played = summarize(rows)["course"] if rows else None
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+
+    def best(candidates):
+        scored = [(course_count(c), c) for c in candidates]
+        scored = [(bool(played and (c / str(played)).is_dir()), n, c) for n, c in scored if n]
+        return max(scored, key=lambda s: s[:2])[2] if scored else None
+
+    if within is not None:
+        within = Path(within)
+        return best([within, within / "Courses", within / "Core" / "GSP" / "Courses", *walk_for_courses([within])])
+    usual = [Path(f"{d}/GSProV1/Core/GSP/Courses") for d in fixed_drives()]
+    return best(usual + courses_from_gspro_files(cfg)) or best(walk_for_courses(fixed_drives()))
+
+
+def save_setting(key, value):
+    raw = load_config_file()
+    raw[key] = value
+    write_atomic(CONFIG, json.dumps(raw, indent=2).encode("utf-8"))
+
+
+def cmd_find_courses(cfg, a):
+    """Exit codes the installer relies on: 0 the folder is known, 1 it isn't."""
+    if not a.folder and courses_dir(cfg).is_dir():
+        print("Courses folder:", courses_dir(cfg))
+        return 0
+    found = find_courses(cfg, a.folder)
+    if found is None:
+        print(f"No courses found in {a.folder}" if a.folder else "Couldn't find GSPro's courses on this PC's hard drives.")
+        return 1
+    save_setting("courses_dir", found.as_posix())
+    print(f"Found courses in {found} ({course_count(found)})")
+    if watcher_running(cfg):
+        print(RESTART_NOTE)
+    return 0
 
 
 def output_dir(cfg):
@@ -170,7 +312,10 @@ def prepare_course(cfg, source, course_key):
     """Download whatever this course's real terrain still needs. A failure only means a plainer page."""
     where = course_location(cfg, course_key)
     if not where:
-        log.info("%s: no location in its course file, so no real terrain", course_key)
+        if gkd_file(cfg, course_key):
+            log.info("%s: no location in its course file, so no real terrain", course_key)
+        else:
+            log.warning("%s: no course file in %s, so no location and no real terrain", course_key, courses_dir(cfg) / str(course_key))
         return
     gkd = gkd_file(cfg, course_key)
     args = [sys.executable, str(HERE / "course_data.py"), "--folder", str(course_data_dir(cfg, course_key)), "--lat", str(where[0]), "--lon", str(where[1]),
@@ -382,6 +527,12 @@ def cmd_watch(cfg, a):
         log.info("a watcher is already running")
         return 0
     (output_dir(cfg) / "watcher.pid").write_text(str(os.getpid()), encoding="utf-8")
+    if not courses_dir(cfg).is_dir():   # GSPro may have been installed or moved since setup
+        found = find_courses(cfg)
+        if found is not None:
+            save_setting("courses_dir", found.as_posix())
+            cfg["courses_dir"] = found.as_posix()
+            log.info("found GSPro's courses in %s", found)
     log.info("watching %s", round_file(cfg))
     watcher = Watcher(cfg)
     while True:
@@ -410,6 +561,90 @@ def cmd_build(cfg, a):
     return 0 if publish(cfg, state) else 1
 
 
+def merge_rows(first, second):
+    """One round from two parts of it. A hole in both parts comes from the part that finished it (the first, if both
+    did), and every player's holes are decided separately. Returns the rows and notes on what was decided."""
+    def by_hole(rows):
+        holes = {}
+        for r in rows:
+            holes.setdefault((r["UserGuid"], r["Hole"]), []).append(r)
+        return holes
+
+    a, b = by_hole(first), by_hole(second)
+    finished = lambda rows: rows[-1]["HoleResult"] == 7
+    notes, keep_a, keep_b = [], set(a), set(b)
+    for key in sorted(set(a) & set(b), key=lambda k: k[1]):
+        name, hole = a[key][0].get("PlayerName", "player"), key[1] + 1
+        if finished(a[key]):
+            keep_b.discard(key)
+            notes.append(f"{name}, hole {hole}: in both parts; using the first" + (", as both finished it" if finished(b[key]) else ", as only it finished the hole"))
+        else:
+            keep_a.discard(key)
+            notes.append(f"{name}, hole {hole}: in both parts; using the second, as the first didn't finish the hole")
+    offset = max(r["GlobalShotNumber"] for r in first)    # each part numbers its shots from 1, and they set the play order
+    round_id = first[-1]["RoundID"]
+    merged = [r for r in first if (r["UserGuid"], r["Hole"]) in keep_a]
+    merged += [dict(r, GlobalShotNumber=r["GlobalShotNumber"] + offset, RoundID=round_id) for r in second if (r["UserGuid"], r["Hole"]) in keep_b]
+    return merged, notes
+
+
+def cmd_merge(cfg, a):
+    """Joins a round that GSPro split in two, such as when the PC restarted part-way through."""
+    setup_logging(cfg)
+    saved = output_dir(cfg) / "saved"
+    parts = []
+    for name in a.parts:
+        matches = [Path(name)] if Path(name).is_file() else sorted(saved.glob(f"*-round-{name}.dat"))
+        if not matches:
+            print(f"no saved round {name} in {saved}")
+            return 1
+        rows = parse_rounds_file(matches[0].read_bytes())
+        if rows is None:
+            print(f"no round in {matches[0]}")
+            return 1
+        parts.append((matches[0], rows))
+    parts.sort(key=lambda p: p[1][-1]["RoundID"])
+    (path1, rows1), (path2, rows2) = parts
+    info1, info2 = summarize(rows1), summarize(rows2)
+    if info1["round_id"] == info2["round_id"] or info1["course"] != info2["course"]:
+        print(f"these can't be joined: round {info1['round_id']} on {info1['course']}, and round {info2['round_id']} on {info2['course']}")
+        return 1
+
+    # the watcher keeps the state in memory and would write over this, so it has to be stopped first
+    was_running = watcher_running(cfg)
+    if was_running:
+        cmd_stop(cfg, a)
+    merged, notes = merge_rows(rows1, rows2)
+    for note in notes:
+        print(note)
+    info = summarize(merged)
+    source = saved / f"{stem_for(info['course'], info['round_id'])}-merged.dat"
+    write_atomic(source, json.dumps(merged, separators=(",", ":")).encode("utf-8"))
+    latest = max(path1.stat().st_mtime, path2.stat().st_mtime)
+    os.utime(source, (latest, latest))                    # the page's date comes from this time
+    print(f"Joining rounds {info1['round_id']} and {info2['round_id']}: {info['holes']} holes. Building the page...")
+    page = build_page(cfg, source, info["course"], info["round_id"])
+    if page:
+        (rounds_dir(cfg) / f"{stem_for(info2['course'], info2['round_id'])}.html").unlink(missing_ok=True)
+        make_index.write_index(rounds_dir(cfg))
+        state = load_state(cfg)
+        for part in (info1, info2):                       # the parts stay in saved, but shouldn't get pages again
+            rec = state["rounds"].get(str(part["round_id"]))
+            if rec:
+                rec["built_sha"] = rec["sha"]
+        save_state(cfg, state)
+        print("Built", page)
+        if cfg["publish_to"]:
+            publish(cfg, state)
+            print(f"Round {info2['round_id']}'s old page is still in your bucket; delete it there if you don't want it.")
+    else:
+        print("The build failed; the reason is in", output_dir(cfg) / "retrace.log")
+    if was_running:
+        subprocess.Popen([str(Path(sys.executable).with_name("pythonw.exe")), str(HERE / "retrace.py"), "watch"], cwd=HERE,
+                         creationflags=subprocess.DETACHED_PROCESS)
+    return 0 if page else 1
+
+
 def cmd_index(cfg, a):
     count = make_index.write_index(rounds_dir(cfg))
     print(f"{rounds_dir(cfg) / make_index.INDEX}: {count} round(s)")
@@ -425,7 +660,7 @@ def cmd_open(cfg, a):
 def cmd_publish(cfg, a):
     setup_logging(cfg)
     if not cfg["publish_to"]:
-        log.error('no bucket set: python retrace.py set publish_to gs://your-bucket')
+        log.error("no bucket set; to set one, run:\n       %s", run_me("set publish_to gs://your-bucket"))
         return 1
     make_index.write_index(rounds_dir(cfg))
     return 0 if publish(cfg, load_state(cfg)) else 1
@@ -446,6 +681,8 @@ def cmd_set(cfg, a):
         raw.pop(a.key, None)
     write_atomic(CONFIG, json.dumps(raw, indent=2).encode("utf-8"))
     print(f"set {a.key} = {a.value!r} in {CONFIG}")
+    if watcher_running(cfg):
+        print(RESTART_NOTE)
     return 0
 
 
@@ -505,14 +742,14 @@ def cmd_check(cfg, a):
             __import__(mod)
             line(True, f"Python package {pip_name}")
         except ImportError:
-            line(False, f"Python package {pip_name}", "missing; run: python -m pip install -r requirements.txt")
+            line(False, f"Python package {pip_name}", "missing; run Install.bat again")
     rf = round_file(cfg)
     if rf.exists():
         line(True, "Round file", rf)
     else:
         line(None, "Round file not there yet", f"{rf} (GSPro creates it during a round; if you've played one, set round_file)")
     cd = courses_dir(cfg)
-    line(cd.is_dir(), "Courses folder", cd if cd.is_dir() else f"{cd} not found; run: python retrace.py set courses_dir \"D:/your/Courses\"")
+    line(cd.is_dir(), "Courses folder", cd if cd.is_dir() else f"{cd} not found. To point Retrace at your Courses folder (GSPro shows it under Settings > Game > Course Folder), run these in a command window:\n       " + run_me('find-courses "D:/your/Courses"'))
     if rf.exists():
         rows = parse_rounds_file(rf.read_bytes())
         if rows is None:
@@ -560,6 +797,12 @@ def main():
     p.add_argument("key")
     p.add_argument("value")
     p.set_defaults(fn=cmd_set)
+    p = sub.add_parser("merge")
+    p.add_argument("parts", nargs=2, metavar="ROUND", help="a saved round's number, or its file")
+    p.set_defaults(fn=cmd_merge)
+    p = sub.add_parser("find-courses")
+    p.add_argument("folder", nargs="?", help="look only in this folder (default: search this PC, if the folder isn't known yet)")
+    p.set_defaults(fn=cmd_find_courses)
     p = sub.add_parser("startup")
     p.add_argument("state", choices=("on", "off"))
     p.set_defaults(fn=cmd_startup)

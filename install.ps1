@@ -105,6 +105,21 @@ try {
     $global:LASTEXITCODE = 0
     $ErrorActionPreference = "Stop"
 
+    Step "Looking for your GSPro courses (this can take up to a minute)..."
+    $ErrorActionPreference = "Continue"
+    & $Python $Retrace find-courses 2>&1 | ForEach-Object { Step "  $_" }
+    while ($LASTEXITCODE -ne 0) {
+        # the only question setup ever asks; pressing Enter skips it, and with no one there to answer it's skipped too
+        Write-Host ""
+        Write-Host "  GSPro shows your Courses folder under Settings > Game > Course Folder."
+        $answer = $null
+        try { $answer = Read-Host "  Paste that folder here, or press Enter to set it later" } catch { }
+        if (-not $answer -or -not $answer.Trim().Trim('"')) { break }
+        & $Python $Retrace find-courses $answer.Trim().Trim('"') 2>&1 | ForEach-Object { Step "  $_" }
+    }
+    $global:LASTEXITCODE = 0
+    $ErrorActionPreference = "Stop"
+
     Step "Starting Retrace, now and whenever you sign in..."
     Run $Python @($Retrace, "startup", "on") "set Retrace to start at sign-in"
     Run $Python @($Retrace, "index") "create your rounds page"

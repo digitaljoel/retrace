@@ -10,6 +10,9 @@ config.json
 lidar/
 osm/
 
+# GSPro course folders, which belong to their designers
+*_GSP/
+
 # Local backups
 backup-*/
 
