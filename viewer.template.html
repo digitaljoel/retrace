@@ -332,9 +332,10 @@ button { font: inherit; color: inherit; }
     <button class="btn icon" id="b-next" aria-label="Next hole"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 3 5 5-5 5"/></svg></button>
     <button class="btn" id="b-all" aria-pressed="false">All holes</button>
     <button class="btn" id="b-play"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.8v10.4c0 .5.6.8 1 .5l8-5.2a.6.6 0 0 0 0-1L5 2.3c-.4-.3-1 0-1 .5Z"/></svg><span>Replay hole</span></button>
+    <button class="btn" id="b-auto" aria-pressed="false" title="Play every hole from here to the end of the round"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M2 3.2v9.6c0 .5.5.8.9.5L8 9.9v2.9c0 .5.5.8.9.5l6-4.8a.6.6 0 0 0 0-1l-6-4.8c-.4-.3-.9 0-.9.5v2.9L2.9 2.7c-.4-.3-.9 0-.9.5Z"/></svg><span>Autoplay</span></button>
   </div>
   <div class="seg" id="who" role="group" aria-label="Player"></div>
-  <div class="kbd">← → hole · P player · A all holes · Space replay · drag to orbit</div>
+  <div class="kbd">← → hole · P player · A all holes · Space replay · drag to orbit · right-drag to move · scroll to zoom</div>
 </section>
 
 <aside class="card shots" aria-label="Shots">
@@ -401,8 +402,10 @@ scene.fog = new THREE.Fog(0xd6e2dc, 800, 4000);
 const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 2, 30000);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true; controls.dampingFactor = 0.08;
-controls.maxPolarAngle = Math.PI * 0.46; controls.minDistance = 20; controls.maxDistance = 12000;
+// low enough to stand behind the ball and look up the line; keepAboveGround stops it going under the course
+controls.maxPolarAngle = Math.PI * 0.55; controls.minDistance = 3; controls.maxDistance = 12000;
 controls.screenSpacePanning = false;
+controls.zoomToCursor = true;
 const hemi = new THREE.HemisphereLight(0xe2efff, 0x5a4a33, 1.05);
 const sun = new THREE.DirectionalLight(0xfff0d8, 1.75);
 sun.position.set(-420, 640, 300);
@@ -506,8 +509,10 @@ const seaSide = new THREE.MeshLambertMaterial({ color: '#2C6F8E', side: THREE.Do
   items.forEach((it, k) => {
     const n = it.p.length / 2, ring = [];
     for (let i = 0; i < n; i++) ring.push(new THREE.Vector2(it.p[i * 2], it.p[i * 2 + 1]));
-    wall.setHSL(0.08 + ((k * 7) % 10) * 0.005, 0.16, 0.62 + ((k * 3) % 10) * 0.012);
-    roof.setHSL(0.05 + ((k * 11) % 10) * 0.012, 0.1, 0.34 + ((k * 13) % 10) * 0.012);
+    // light gray walls and charcoal roofs, varied a little so a neighborhood doesn't look stamped out; walls get
+    // less of the light than roofs do, so they're set brighter than white to still look light gray once lit
+    wall.setHSL(0.6, 0.04, 0.82 + ((k * 3) % 10) * 0.01).multiplyScalar(2);
+    roof.setHSL(0.6, 0.06, 0.09 + ((k * 13) % 10) * 0.005);
     for (let i = 0; i < n; i++) {
       const a = ring[i], d = ring[(i + 1) % n];
       const a0 = [a.x, it.b, a.y], a1 = [a.x, it.t, a.y], d0 = [d.x, it.b, d.y], d1 = [d.x, it.t, d.y];
@@ -732,7 +737,7 @@ PL.forEach((pl, pi) => {
 // ---------------------------------------------------------------- state
 const state = { hole: 0, all: false, who: 0, selected: null };
 const shown = () => (state.who === 'both' ? PL.map((_, i) => i) : [state.who]);
-let anim = null, afterReplay = null;
+let anim = null, afterReplay = null, cameraIsYours = false, autoplay = null;
 const ball = label(css('ballmk'), new THREE.Vector3()); ball.visible = false;
 // the ball's shadow on the ground, straight below it: the clearest cue to where the ball is and how high
 const ballShadow = (() => {
@@ -886,6 +891,7 @@ function overviewView() {
 }
 let tween = null;
 function flyTo(view, ms = 950) {
+  cameraIsYours = false;
   if (reduceMotion || ms === 0) { camera.position.copy(view.pos); controls.target.copy(view.target); controls.update(); tween = null; return; }
   tween = { p0: camera.position.clone(), t0: controls.target.clone(), p1: view.pos, t1: view.target, start: performance.now(), ms };
 }
@@ -1079,7 +1085,7 @@ function renderList() {
   }
   const ch = C.holes[state.hole];
   $('s-title').textContent = `Hole ${ch.n}`;
-  $('s-sub').textContent = `Par ${ch.par} · ${ch.yards} yds${ch.index ? ' · index ' + ch.index : ''} · tap a shot to replay it`;
+  $('s-sub').textContent = `Par ${ch.par} · ${ch.yards} yds${ch.index ? ' · index ' + ch.index : ''} · tap a shot to replay it, or move the camera and tap it again to watch from there`;
   const img = DATA.images[String(ch.n)];
   fig.hidden = !img;
   if (img) { $('s-img').src = img; $('s-img').alt = `GSPro tee view of hole ${ch.n}`; $('s-cap').textContent = 'In-game tee view'; }
@@ -1142,6 +1148,8 @@ function selectItem(pi, hi, k, replay) {
   if (state.all || hi !== state.hole) goHole(hi, { fly: false });
   if (!shown().includes(pi)) { state.who = pi; refresh(); }
   const same = state.selected && state.selected[0] === pi && state.selected[1] === hi && state.selected[2] === k;
+  // tapping the shot again after moving the camera watches it from there
+  if (same && replay && cameraIsYours && (it.kind === 'shot' || it.kind === 'mulligan')) { play([it], 'shot'); anim.auto = false; return; }
   state.selected = same ? null : [pi, hi, k];
   dimOthers(); renderList();
   if (!state.selected) { stopAnim(); flyTo(holeView(hi)); return; }
@@ -1183,16 +1191,45 @@ lb.addEventListener('click', () => closeTeeView());
 $('b-prev').addEventListener('click', () => (state.all ? goHole(NH - 1) : goHole((state.hole - 1 + NH) % NH)));
 $('b-next').addEventListener('click', () => (state.all ? goHole(0) : goHole((state.hole + 1) % NH)));
 $('b-all').addEventListener('click', () => (state.all ? goHole(state.hole) : goAll()));
+// play order across players comes from GSPro's global shot number
+function holeQueue(hi) {
+  const q = [];
+  for (const pi of shown()) { const h = PL[pi].holes[hi]; if (h) q.push(...h.items.filter(i => i.lines)); }
+  return q.sort((a, b) => a.gsn - b.gsn || a.stroke - b.stroke);
+}
 $('b-play').addEventListener('click', () => {
   userTakesOver();
   if (anim) { stopAnim(); return; }
   if (state.all) return;
   state.selected = null; dimOthers(); renderList();
-  // play order across players comes from GSPro's global shot number
-  const q = [];
-  for (const pi of shown()) { const h = PL[pi].holes[state.hole]; if (h) q.push(...h.items.filter(i => i.lines)); }
-  q.sort((a, b) => a.gsn - b.gsn || a.stroke - b.stroke);
-  play(q, 'hole');
+  play(holeQueue(state.hole), 'hole');
+});
+// Autoplay replays each hole in turn, from this one to the end of the round. Moving the camera doesn't stop it;
+// choosing a hole, shot or player, or pressing Stop, does.
+const AUTO_LOOK = 1900, AUTO_LINGER = 1800;   // ms to take in the next hole before it starts, and the last before moving on
+function setAutoplay(a) {
+  if (autoplay) clearTimeout(autoplay.timer);
+  autoplay = a;
+  $('b-auto').setAttribute('aria-pressed', String(!!a));
+  $('b-auto').querySelector('span').textContent = a ? 'Stop' : 'Autoplay';
+}
+function autoplayFrom(hi) {
+  const a = autoplay;
+  while (hi < NH && !holeQueue(hi).length) hi++;
+  if (hi >= NH) { setAutoplay(null); goAll(); return; }
+  a.busy = true; goHole(hi, { fly: false }); a.busy = false;
+  flyTo(holeView(hi), 1400);
+  a.timer = setTimeout(() => {
+    play(holeQueue(hi), 'hole');
+    anim.onDone = () => { a.timer = setTimeout(() => autoplayFrom(hi + 1), AUTO_LINGER); };
+  }, AUTO_LOOK);
+}
+$('b-auto').addEventListener('click', () => {
+  if (autoplay) { setAutoplay(null); stopAnim(); return; }
+  userTakesOver();
+  const from = state.all ? 0 : state.hole;
+  setAutoplay({ timer: 0, busy: false });
+  autoplayFrom(from);
 });
 addEventListener('keydown', e => {
   if (e.target.closest && e.target.closest('input, textarea')) return;
@@ -1205,6 +1242,7 @@ addEventListener('keydown', e => {
   else if (/^[1-4]$/.test(e.key) && !e.metaKey && !e.ctrlKey && !e.altKey) previewScore(+e.key);
   else if ((e.key === 'h' || e.key === 'H') && !e.metaKey && !e.ctrlKey && !e.altKey) reelBtn.click();
   else if (e.key === 'Escape' && reel) endReel(false);
+  else if (e.key === 'Escape' && autoplay) $('b-auto').click();
   else if (e.key === 'Escape' && state.selected) { const [pi, hi, k] = state.selected; selectItem(pi, hi, k, false); }
 });
 
@@ -1766,7 +1804,7 @@ function finishAnim(now) {
   anim = null; ball.visible = false; setPlayLabel(); markPlaying(null);
   if (done) done();
   // after a whole-hole replay, linger on the green, then pull back to the hole
-  if (mode === 'hole' && auto) afterReplay = { at: now + (wasGreen ? 1800 : 900) };
+  if (mode === 'hole' && auto && !autoplay) afterReplay = { at: now + (wasGreen ? 1800 : 900) };
 }
 function stepAnim(now) {
   if (!anim) return;
@@ -1980,7 +2018,7 @@ function showCard(hl, take, fresh) {
 }
 // reel-driven navigation must not count as the viewer taking over
 function internal(fn) { const r = reel; if (r) r.busy = true; try { fn(); } finally { if (r) r.busy = false; } }
-function userTakesOver() { if (reel && !reel.busy) endReel(false); }
+function userTakesOver() { if (reel && !reel.busy) endReel(false); if (autoplay && !autoplay.busy) setAutoplay(null); }
 function endReel(restore) {
   if (!reel) return;
   const r = reel; reel = null;
@@ -2046,6 +2084,16 @@ async function runReel(from = 0) {
 reelBtn.addEventListener('click', () => (reel ? endReel(false) : runReel()));
 reelBtn.addEventListener('keydown', e => { if (e.key === ' ') e.stopPropagation(); });
 
+const EYE_HEIGHT = 1.5;
+function keepAboveGround() {
+  const floor = Math.max(groundY(camera.position.x, camera.position.z), T.sea ?? -Infinity) + EYE_HEIGHT;
+  if (camera.position.y < floor) camera.position.y = floor;
+}
+// the near plane follows the camera, so nothing nearby gets cut away when it's low and close
+function fitNearPlane(dist) {
+  const near = THREE.MathUtils.clamp(Math.min(dist, camera.position.y - groundY(camera.position.x, camera.position.z)) * 0.3, 0.2, 2);
+  if (Math.abs(near - camera.near) > 0.01) { camera.near = near; camera.updateProjectionMatrix(); }
+}
 function frame(now) {
   if (tween) {
     const k = Math.min(1, (now - tween.start) / tween.ms);
@@ -2055,6 +2103,7 @@ function frame(now) {
     if (k >= 1) tween = null;
   }
   controls.update();
+  keepAboveGround();
   stepAnim(now);
   placeBallShadow();
   stepFx(now);
@@ -2062,7 +2111,8 @@ function frame(now) {
   const dist = camera.position.distanceTo(controls.target);
   const flagScale = THREE.MathUtils.clamp(dist / 230, 0.3, 1);
   for (const ch of C.holes) ch.flagGroup.scale.setScalar(flagScale);
-  scene.fog.near = dist * 1.4; scene.fog.far = dist * 4.2 + 600;
+  fitNearPlane(dist);
+  scene.fog.near = Math.max(dist * 1.4, 250); scene.fog.far = dist * 4.2 + 600;
   const jolt = shakeOffset(now);
   if (jolt) camera.position.add(jolt);
   renderer.render(scene, camera);
@@ -2078,12 +2128,12 @@ function onResize() {
 }
 addEventListener('resize', () => { onResize(); flyTo(state.all ? overviewView() : holeView(state.hole), 0); });
 // once the viewer grabs the camera, the replay stops steering it
-controls.addEventListener('start', () => { tween = null; afterReplay = null; if (anim) anim.auto = false; });
+controls.addEventListener('start', () => { tween = null; afterReplay = null; cameraIsYours = true; if (anim) anim.auto = false; });
 
 onResize();
 goHole(0, { fly: false });
 flyTo(holeView(0), 0);
 requestAnimationFrame(frame);
-window.__viewer = { goHole, goAll, setWho, selectItem, state, get anim() { return anim; }, get fx() { return fx.length; }, setFxTime: v => (FX_TIME = v), previewScore, highlights: HIGHLIGHTS, get reel() { return reel; }, setReelPace: v => (REEL_PACE = v), runReel, endReel,
+window.__viewer = { get autoplay() { return autoplay; }, goHole, goAll, setWho, selectItem, state, get anim() { return anim; }, get fx() { return fx.length; }, setFxTime: v => (FX_TIME = v), previewScore, highlights: HIGHLIGHTS, get reel() { return reel; }, setReelPace: v => (REEL_PACE = v), runReel, endReel,
   hiddenLines: () => PL.reduce((n, pl) => n + pl.holes.reduce((m, h) => m + (h ? h.items.filter(it => it.lines && Object.values(it.lines).some(l => !l.visible)).length : 0), 0), 0), celebrate: (pi, hi, k, big) => celebrate(PL[pi].holes[hi].items[k], performance.now(), big ? { big: true, label: 'Holed out! · 34 yd' } : undefined) };
 </script>
