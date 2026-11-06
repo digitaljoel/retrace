@@ -707,33 +707,47 @@ if DEM:
     print(f"rock {np.mean(CLS == 10) * 100:.1f}%, shore {np.mean(CLS == 11) * 100:.1f}%, sea {np.mean(CLS == 12) * 100:.1f}% of triangles")
 
 # ---------------------------------------------------------------- what to draw
-# The grid is a rectangle around the course, and one that winds through houses takes in whole neighbourhoods.
-# Only ground within MARGIN of the golf is drawn (shots, the course file's tees, pins, hazards and bounds, and
-# the mapped fairways, greens, tees and bunkers), with the trees and buildings on it. Small pockets enclosed
-# by the course stay, so there are no pits between holes. A course by the sea keeps it all, sea and all.
-MARGIN, POCKET_M2 = 100.0, 40000.0
+# The grid is a rectangle around the course, and one that winds past houses takes in whole neighbourhoods
+# beyond it. Everything inside the course's outer edge is drawn: its OpenStreetMap outline and the course
+# file's out-of-bounds line, with any holes in them filled, plus MARGIN beyond the golf (shots, tees, pins,
+# hazards and the mapped fairways, greens, tees and bunkers), plus anything those enclose. Only what lies
+# outside all of that is left out, with its trees and buildings. Heights stay everywhere, so nothing that
+# reads the ground is affected. A course by the sea keeps it all, sea and all.
+MARGIN = 100.0
 KEEP = None
 if SEA is None:
+    import shapely
+    from shapely.geometry import Polygon as _Polygon
     from scipy import ndimage as _ndi
     CX, CZ = np.meshgrid(x0 + (np.arange(nx - 1) + 0.5) * CELL, z0 + (np.arange(nz - 1) + 0.5) * CELL)
     centres = np.stack([CX.ravel(), CZ.ravel()], 1)
     golf_pts = np.vstack([S[:, :2]] + ([track_xz] if len(track_xz) else []))
     cell_keep = cKDTree(golf_pts).query(centres, distance_upper_bound=MARGIN)[0] < MARGIN
+    outer = []
     if OSM_L is not None:
         golf = shapely.union_all([OSM_L[k] for k in ("fairway", "green", "tee", "bunker")])
         if not golf.is_empty:
-            cell_keep |= shapely.contains_xy(golf.buffer(MARGIN, quad_segs=4), centres[:, 0], centres[:, 1])
+            outer.append(golf.buffer(MARGIN, quad_segs=4))
+        # the course's mapped outline, holes and all; one that holds none of this round's golf is a neighbour
+        for part in getattr(OSM_L["course"], "geoms", [OSM_L["course"]]):
+            if not part.is_empty and part.geom_type == "Polygon":
+                whole = _Polygon(part.exterior)
+                if shapely.contains_xy(whole, golf_pts[:, 0], golf_pts[:, 1]).any():
+                    outer.append(whole)
+    if oob is not None:
+        outer.append(_Polygon([xz(q) for q in oob]).buffer(0))
+    for geom in outer:
+        cell_keep |= shapely.contains_xy(geom, centres[:, 0], centres[:, 1])
     cell_keep = cell_keep.reshape(nz - 1, nx - 1)
     gaps, n_gaps = _ndi.label(~cell_keep)
-    if n_gaps:
-        size = np.bincount(gaps.ravel())
-        edge = np.unique(np.concatenate([gaps[0], gaps[-1], gaps[:, 0], gaps[:, -1]]))
-        small = size * CELL * CELL < POCKET_M2
-        small[0] = False; small[edge] = False
-        cell_keep |= small[gaps]
+    if n_gaps:      # gaps that don't reach the edge of the grid are inside the course: fill them
+        enclosed = np.ones(n_gaps + 1, bool)
+        enclosed[0] = False
+        enclosed[np.unique(np.concatenate([gaps[0], gaps[-1], gaps[:, 0], gaps[:, -1]]))] = False
+        cell_keep |= enclosed[gaps]
     if not cell_keep.all():
         KEEP = np.repeat(cell_keep.ravel(), 2)          # per triangle, two to a cell, as CLS
-        print(f"drawing {cell_keep.mean() * 100:.0f}% of the ground: within {MARGIN:.0f} m of the golf")
+        print(f"drawing {cell_keep.mean() * 100:.0f}% of the ground: the course and {MARGIN:.0f} m around its golf")
 
 # ---------------------------------------------------------------- trees
 tree_r = None
@@ -759,7 +773,7 @@ if not TREES:
     cand = np.stack([rng.uniform(x0 + 15, x1 - 15, ncand), rng.uniform(z0 + 15, z1 - 15, ncand)], 1)
     cc = CLS[near_tree.query(cand)[1]]
     if KEEP is not None:
-        cc = np.where(KEEP[near_tree.query(cand)[1]], cc, -1)    # no trees off the drawn ground
+        cc = np.where(KEEP[near_tree.query(cand)[1]], cc, 255)   # no trees off the drawn ground (255: no class)
     woods = vnoise(18)
     wi = np.clip(((cand[:, 0] - x0) / CELL).astype(int), 0, nx - 1); wj = np.clip(((cand[:, 1] - z0) / CELL).astype(int), 0, nz - 1)
     dens = woods[wj, wi]

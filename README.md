@@ -199,9 +199,10 @@ The map and the ground start downloading as soon as a round on a new course begi
 for the processor, disk and memory, so the game comes first and less is left to do when you finish. The trees
 still wait for the end of the round. To wait for the end for everything: `retrace.py set download_early off`.
 
-The page shows the ground within about 100 m of the golf: your shots, the course file's tees, pins, hazards and
-boundary, and the mapped fairways, greens, tees and bunkers. On a course that winds through houses, the
-neighbourhoods beyond that are left out.
+The page shows everything inside the course's outer edge, from its OpenStreetMap outline and the course file's
+out-of-bounds line, plus about 100 m around the golf: your shots wherever they went, the tees, pins and hazards,
+and the mapped fairways, greens, tees and bunkers. Neighbourhoods inside the course stay; ones beyond its edge are
+left out.
 
 | | In the United States | Everywhere else |
 |---|---|---|
