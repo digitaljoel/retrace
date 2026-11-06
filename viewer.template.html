@@ -710,7 +710,8 @@ PL.forEach((pl, pi) => {
         it.carryYd = horiz(start, td) * YD;
         it.totalYd = horiz(start, end) * YD;
         it.stiff = stiffness(it, start);
-        it.bomb = it.kind === 'shot' && !it.putt && (it.stroke === 1 || it.fromLie === 'Tee') && it.carryYd >= BOMB_CARRY ? { carry: Math.round(it.carryYd) } : null;
+        // a long drive that ends in a penalty isn't something to celebrate
+        it.bomb = it.kind === 'shot' && !it.putt && !it.pen && (it.stroke === 1 || it.fromLie === 'Tee') && it.carryYd >= BOMB_CARRY ? { carry: Math.round(it.carryYd) } : null;
         if (!mull) { lastRest = end; lastLie = it.toLie; }
       } else if (it.kind === 'penalty') {
         const drop = v3(it.drop);
