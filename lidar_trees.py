@@ -274,6 +274,9 @@ def canopy_heights(box, crs, w, h, res):
 
 
 def main():
+    if os.environ.get("RETRACE_BACKGROUND") and os.name == "nt":   # downloading ahead while a round is played
+        import ctypes
+        ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x00100000)
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--canopy", action="store_true", help="use the worldwide canopy height map instead of a survey's point cloud")
     ap.add_argument("--dem"); ap.add_argument("--align")

@@ -368,6 +368,7 @@ const DATA = JSON.parse(document.getElementById('round-data').textContent);
 const C = DATA.course, PL = DATA.players, NH = C.holes.length;
 const YD = 1.0936133, FT = 3.28084;
 const STIFF_FROM = 50 / YD, STIFF_IN = 10 / FT;  // celebrate approaches from 50+ yards that finish inside 10 feet
+const TAP_IN = 24 / 12 / FT;                       // and anything from off the green that finishes within 24 inches
 const BOMB_CARRY = 240;                           // drives carrying this many yards explode off the tee
 let FX_TIME = 1;                                  // effect clock rate (1 = real time)
 const PALETTE = ['#FF5B3F', '#FFC93D', '#45CFFF', '#FF77D4', '#FFFFFF', '#B18CFF', '#FF9A45', '#64F0C6'];
@@ -418,6 +419,10 @@ const NX = T.nx, NZ = T.nz, CELL = T.cell;
 const H = new Float32Array(NX * NZ);
 { const dv = new DataView(b64(T.h).buffer); for (let k = 0; k < H.length; k++) H[k] = dv.getInt16(k * 2, true) / 10; }
 const CLS = T.cls ? b64(T.cls) : null;
+// which cells are drawn: only ground near the golf, so a course among houses doesn't bring the neighbourhood along
+const KEEP_BITS = T.keep ? b64(T.keep) : null;
+const drawn = (i, j) => i >= 0 && j >= 0 && i < NX - 1 && j < NZ - 1 &&
+  (!KEEP_BITS || ((KEEP_BITS[(j * (NX - 1) + i) >> 3] >> (7 - ((j * (NX - 1) + i) & 7))) & 1) === 1);
 function groundY(x, z) {
   const fx = (x - T.x0) / CELL, fz = (z - T.z0) / CELL;
   const i = Math.max(0, Math.min(NX - 2, Math.floor(fx))), j = Math.max(0, Math.min(NZ - 2, Math.floor(fz)));
@@ -431,7 +436,8 @@ const SURF = { 0: '#8E9F63', 1: '#6E9E48', 2: '#8BC756', 3: '#A6DB63', 4: '#93CC
 const seaMat = new THREE.MeshLambertMaterial({ color: '#3A93B8', transparent: true, opacity: 0.94 });
 const seaSide = new THREE.MeshLambertMaterial({ color: '#2C6F8E', side: THREE.DoubleSide, transparent: true, opacity: 0.9 });
 (function buildTerrain() {
-  const cells = (NX - 1) * (NZ - 1);
+  let cells = 0;
+  for (let j = 0; j < NZ - 1; j++) for (let i = 0; i < NX - 1; i++) cells += drawn(i, j);
   const pos = new Float32Array(cells * 18), col = new Float32Array(cells * 18);
   const base = {}; for (const k in SURF) base[k] = new THREE.Color(SURF[k]);
   const c = new THREE.Color();
@@ -456,6 +462,7 @@ const seaSide = new THREE.MeshLambertMaterial({ color: '#2C6F8E', side: THREE.Do
   };
   for (let j = 0; j < NZ - 1; j++) {
     for (let i = 0; i < NX - 1; i++) {
+      if (!drawn(i, j)) continue;
       const X0 = T.x0 + i * CELL, X1 = X0 + CELL, Z0 = T.z0 + j * CELL, Z1 = Z0 + CELL;
       const h00 = H[j * NX + i], h10 = H[j * NX + i + 1], h01 = H[(j + 1) * NX + i], h11 = H[(j + 1) * NX + i + 1];
       const ci = (j * (NX - 1) + i) * 2;
@@ -480,10 +487,15 @@ const seaSide = new THREE.MeshLambertMaterial({ color: '#2C6F8E', side: THREE.Do
   let minH = Infinity; for (const h of H) minH = Math.min(minH, h);
   const baseY = minH - 28, sk = [];
   const edge = pts => { for (let k = 0; k < pts.length - 1; k++) { const [ax, ay, az] = pts[k], [bx, by, bz] = pts[k + 1]; sk.push(ax, ay, az, bx, by, bz, ax, baseY, az, bx, by, bz, bx, baseY, bz, ax, baseY, az); } };
-  const xs = [], xe = [], zs = [], ze = [];
-  for (let i = 0; i < NX; i++) { xs.push([T.x0 + i * CELL, H[i], T.z0]); xe.push([T.x0 + i * CELL, H[(NZ - 1) * NX + i], T.z0 + (NZ - 1) * CELL]); }
-  for (let j = 0; j < NZ; j++) { zs.push([T.x0, H[j * NX], T.z0 + j * CELL]); ze.push([T.x0 + (NX - 1) * CELL, H[j * NX + NX - 1], T.z0 + j * CELL]); }
-  edge(xs); edge(xe); edge(zs); edge(ze);
+  // earth walls under every edge of the drawn ground that has nothing drawn beside it
+  const node = (i, j) => [T.x0 + i * CELL, H[j * NX + i], T.z0 + j * CELL];
+  for (let j = 0; j < NZ - 1; j++) for (let i = 0; i < NX - 1; i++) {
+    if (!drawn(i, j)) continue;
+    if (!drawn(i, j - 1)) edge([node(i, j), node(i + 1, j)]);
+    if (!drawn(i, j + 1)) edge([node(i, j + 1), node(i + 1, j + 1)]);
+    if (!drawn(i - 1, j)) edge([node(i, j), node(i, j + 1)]);
+    if (!drawn(i + 1, j)) edge([node(i + 1, j), node(i + 1, j + 1)]);
+  }
   const sg = new THREE.BufferGeometry();
   sg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(sk), 3));
   sg.computeVertexNormals();
@@ -720,7 +732,8 @@ PL.forEach((pl, pi) => {
         h.group.add(it.lines.putt);
         it.restObj = label(css('anchor', `<span class="tag putt">${putts.length} putt${putts.length > 1 ? 's' : ''}</span>`), a.clone().lerp(b, 0.5));
         h.labels.push(it.restObj);
-        h.puttFrom = lastRest; h.puttFromM = lastRest ? horiz(lastRest, ch.pinV) : 0;
+        // GSPro records the first auto-putt's length; older rounds don't, so it's measured to the pin
+        h.puttFrom = lastRest; h.puttFromM = it.fromM ?? (lastRest ? horiz(lastRest, ch.pinV) : 0);
       }
     });
     // the stroke that finished a birdie-or-better hole gets the score's celebration
@@ -1280,6 +1293,10 @@ function stiffness(it, start) {
   if (it.holed && it.toPinM < 0.5 && it.fromLie !== 'Green') {
     const dist = fromM * YD < 20 ? `${Math.round(fromM * FT)} ft` : `${Math.round(fromM * YD)} yd`;
     return { big: true, label: `Holed out! · ${dist}`, chip: 'Holed out', why: `Holed out from ${dist}${it.fromLie ? ' in the ' + it.fromLie.toLowerCase() : ''}` };
+  }
+  if (it.fromLie !== 'Green' && !it.holed && it.toPinM <= TAP_IN && fromM > TAP_IN) {
+    const inches = Math.max(1, Math.round(it.toPinM * FT * 12)), from = fromM * YD < 20 ? `${Math.round(fromM * FT)} ft` : `${Math.round(fromM * YD)} yd`;
+    return { big: false, tap: true, label: `Tap-in · ${inches} in`, chip: `${inches} in`, why: `Tap-in: ${from}${it.fromLie ? ' from the ' + it.fromLie.toLowerCase() : ''} to ${inches} in` };
   }
   if (it.putt || fromM <= STIFF_FROM || it.toPinM > STIFF_IN) return null;
   const yd = Math.round(fromM * YD), ft = Math.max(1, Math.round(it.toPinM * FT));
@@ -1887,11 +1904,11 @@ function findHighlights() {
         } else if (it.bomb) {
           out.push({ ...base, sub: `${clubName(it.club)} · ${yd(it.totalYd / YD)} yd total`, tier: 0, val: 8, title: `Bomb · ${it.bomb.carry} yd carry`,
                      takes: [['dtl', it, { fx: true }], ['chase', it, { fx: true }], ['landing', it, { slow: true }]] });
-        } else if (it.stiff && !it.putt) {
+        } else if (it.stiff && (!it.putt || it.stiff.tap)) {
           const birdie = puttStep && holing.score;
           const takes = [['dtl', it], ['green', it, { slow: true, fx: true }]];
           if (birdie) takes.push(['putt', puttStep, { fx: true }]);
-          out.push({ ...base, tier: 1, val: 5 - it.toPinM, title: `Stuck it · ${Math.max(1, Math.round(it.toPinM * FT))} ft${birdie ? ` · ${holing.score.name.toLowerCase()}` : ''}`, takes });
+          out.push({ ...base, tier: 1, val: 5 - it.toPinM, title: `${it.stiff.tap ? it.stiff.label : `Stuck it · ${Math.max(1, Math.round(it.toPinM * FT))} ft`}${birdie ? ` · ${holing.score.name.toLowerCase()}` : ''}`, takes });
         } else if (it.putt && it.holed && horiz(v3(it.start), ch.pinV) * FT >= 20) {
           out.push({ ...base, sub: `Putter from ${Math.round(horiz(v3(it.start), ch.pinV) * FT)} ft`, tier: holing === it ? 1 : 2, val: 2,
                      title: `Drained it · ${Math.round(horiz(v3(it.start), ch.pinV) * FT)} ft${holing === it ? ` · ${it.score.name.toLowerCase()}` : ''}`, takes: [['shot', it, { fx: true }]] });

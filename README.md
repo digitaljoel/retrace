@@ -190,10 +190,18 @@ run more than once.
 
 ## Real terrain, greens and trees
 
-You don't need to set anything up. The first time you finish a round on a real-world course, Retrace reads the
-course's location from its course file and downloads what it needs, once per course. Later rounds there reuse it
-and build in seconds. In the US that means reading about 2 GB of lidar over 5 to 10 minutes, so keep it in mind if
-your internet has a data cap, though only about 30 MB is kept. Elsewhere the download is much smaller.
+You don't need to set anything up. The first time you play a real-world course, Retrace reads the course's
+location from its course file and downloads what it needs, once per course. Later rounds there reuse it and build
+in seconds. In the US that means reading about 2 GB of lidar over 5 to 10 minutes, so keep it in mind if your
+internet has a data cap, though only about 30 MB is kept. Elsewhere the download is much smaller.
+
+The map and the ground start downloading as soon as a round on a new course begins, at Windows' lowest priority
+for the processor, disk and memory, so the game comes first and less is left to do when you finish. The trees
+still wait for the end of the round. To wait for the end for everything: `retrace.py set download_early off`.
+
+The page shows the ground within about 100 m of the golf: your shots, the course file's tees, pins, hazards and
+boundary, and the mapped fairways, greens, tees and bunkers. On a course that winds through houses, the
+neighbourhoods beyond that are left out.
 
 | | In the United States | Everywhere else |
 |---|---|---|

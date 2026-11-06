@@ -1,6 +1,7 @@
 """Download everything a course's real terrain needs, once, given its latitude and longitude.
 
     python course_data.py --folder DIR --lat 40.115 --lon -83.026 --round ROUND.dat [--gkd COURSE.GKD]
+    python course_data.py --folder DIR --lat 40.115 --lon -83.026 --download-only
 
 Works through these in order and caches each in DIR, so a course only downloads once. Anything that
 fails is skipped and tried again next time, and the page is simply built with whatever worked:
@@ -13,6 +14,11 @@ fails is skipped and tried again next time, and the page is simply built with wh
   trees      from the lidar point cloud, or else from Meta and WRI's worldwide 1 m canopy height map
 
 The results are listed in DIR/source.json, which retrace.py reads.
+
+--download-only gets the map and the elevation while a round is still being played, so less is left to do
+when it ends. It runs in Windows' background mode, so the game comes first for the processor, the disk and
+memory. It decides nothing: the elevation is kept aside until a finished round can check it, as a few
+holes' worth of shots might not be enough to accept good lidar.
 """
 import argparse, concurrent.futures as cf, io, json, math, os, re, subprocess, sys, time, urllib.request
 from pathlib import Path
@@ -27,6 +33,7 @@ LIDAR_CREDIT = "public USGS lidar"
 TILES_CREDIT = "Mapzen terrain tiles"
 LIDAR_TREES_CREDIT = "the lidar point cloud"
 CANOPY_CREDIT = "Meta and WRI's canopy height map (CC BY 4.0)"
+BACKGROUND = False                         # set by --download-only, and passed on to the scripts it runs
 
 
 def get(url, tries=4):
@@ -40,9 +47,17 @@ def get(url, tries=4):
             time.sleep(2 * (k + 1))
 
 
+def background_mode():
+    """Lowest priority for the processor, the disk and memory, so a round being played isn't disturbed."""
+    if os.name == "nt":
+        import ctypes
+        ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x00100000)  # PROCESS_MODE_BACKGROUND_BEGIN
+
+
 def run(script, *args):
     """Run one of the project's scripts, returning True if it worked."""
-    done = subprocess.run([sys.executable, str(HERE / script)] + [str(a) for a in args], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    done = subprocess.run([sys.executable, str(HERE / script)] + [str(a) for a in args], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                          env=dict(os.environ, RETRACE_BACKGROUND="1") if BACKGROUND else None)
     for line in done.stdout.strip().splitlines()[-4:]:
         print(f"  {line}", flush=True)
     if done.returncode:
@@ -125,10 +140,17 @@ def main():
     ap.add_argument("--folder", required=True, type=Path)
     ap.add_argument("--lat", required=True, type=float)
     ap.add_argument("--lon", required=True, type=float)
-    ap.add_argument("--round", required=True)
+    ap.add_argument("--round")
     ap.add_argument("--gkd", default="-")
     ap.add_argument("--no-lidar", action="store_true", help="use the worldwide sources even where lidar exists")
+    ap.add_argument("--download-only", action="store_true", help="download the map and elevation in the background, but decide nothing")
     a = ap.parse_args()
+    if not (a.round or a.download_only):
+        ap.error("give --round, or --download-only")
+    if a.download_only:
+        global BACKGROUND
+        BACKGROUND = True
+        background_mode()
     d = a.folder
     d.mkdir(parents=True, exist_ok=True)
     state_file = d / "source.json"
@@ -149,6 +171,35 @@ def main():
     have_map = bool(state.get("map"))
 
     dem, align = d / "elevation.tif", d / "align.json"
+    tiles_file = d / "tiles.tif"                   # downloaded ahead, not yet checked
+    lidar_file = lambda url: d / f"lidar-{re.sub(r'[^A-Za-z0-9_-]+', '-', url.rstrip('/').rsplit('/', 1)[-1])}.tif"
+
+    def find_surveys():
+        if a.no_lidar:
+            return []
+        try:
+            return surveys_at(a.lat, a.lon, d.parent / "usgs_surveys.json")
+        except Exception as e:
+            print(f"  couldn't read the list of lidar surveys: {e}", flush=True)
+            return []
+
+    if a.download_only:
+        if not state.get("elevation"):
+            surveys = find_surveys()
+            for url in surveys[:MAX_SURVEYS]:
+                if not lidar_file(url).exists():
+                    print(f"reading lidar ground from {url}", flush=True)
+                    part = d / (lidar_file(url).stem + ".part.tif")
+                    if run("lidar_trees.py", "--make-dem", part, "--lat", a.lat, "--lon", a.lon, "--ept", url):
+                        os.replace(part, lidar_file(url))
+            if not surveys and not tiles_file.exists():
+                print("downloading worldwide terrain tiles", flush=True)
+                try:
+                    tiles_dem(a.lat, a.lon, d / "tiles.part.tif")
+                    os.replace(d / "tiles.part.tif", tiles_file)
+                except Exception as e:
+                    print(f"  terrain tiles failed: {e}", flush=True)
+        return
 
     def try_alignment(rigid):
         align.unlink(missing_ok=True)
@@ -164,24 +215,28 @@ def main():
         save()
 
     if not state.get("elevation"):
-        surveys = []
-        if not a.no_lidar:
-            try:
-                surveys = surveys_at(a.lat, a.lon, d.parent / "usgs_surveys.json")
-            except Exception as e:
-                print(f"  couldn't read the list of lidar surveys: {e}", flush=True)
+        surveys = find_surveys()
         print(f"lidar surveys here: {len(surveys)}", flush=True)
         for url in surveys[:MAX_SURVEYS]:
-            print(f"reading lidar ground from {url}", flush=True)
             dem.unlink(missing_ok=True)
-            if run("lidar_trees.py", "--make-dem", dem, "--lat", a.lat, "--lon", a.lon, "--ept", url) and try_alignment(False):
+            if lidar_file(url).exists():
+                print(f"using the lidar ground read earlier from {url}", flush=True)
+                os.replace(lidar_file(url), dem)
+                made = True
+            else:
+                print(f"reading lidar ground from {url}", flush=True)
+                made = run("lidar_trees.py", "--make-dem", dem, "--lat", a.lat, "--lon", a.lon, "--ept", url)
+            if made and try_alignment(False):
                 state.update(elevation="lidar", survey=url, aligned=True, credit=LIDAR_CREDIT)
                 save()
                 break
         if not state.get("elevation"):
-            print("downloading worldwide terrain tiles", flush=True)
             try:
-                tiles_dem(a.lat, a.lon, dem)
+                if tiles_file.exists():
+                    os.replace(tiles_file, dem)
+                else:
+                    print("downloading worldwide terrain tiles", flush=True)
+                    tiles_dem(a.lat, a.lon, dem)
                 state.update(elevation="tiles", credit=TILES_CREDIT, aligned=try_alignment(True))
                 save()
             except Exception as e:

@@ -32,6 +32,9 @@ BUILDINGS = _opts.get("buildings")                                    # measured
 ALIGN_DATA = None
 rows = json.load(open(ROUND, encoding="utf-8-sig"))
 gkd = json.load(open(GKD, encoding="utf-8-sig")) if GKD != "-" and os.path.exists(GKD) else None
+# some course files have no out-of-bounds line, or no hazards: the field is then missing, null or empty
+OOB_COORDS = ((gkd or {}).get("pOOB") or {}).get("coords") or []
+HAZARDS = [hz["coords"] for hz in (gkd or {}).get("Hazards") or [] if len(hz.get("coords") or []) >= 3]
 YD = 1.0936133
 LIE = {18: "Tee", 1: "Rough", 2: "Fairway", 3: "Deep rough", 4: "Cart path", 5: "Green", 11: "Bunker"}
 MAT = {"TVGfairway": "Fairway", "TVGrough": "Rough", "TVGdeeprough": "Deep rough",
@@ -46,7 +49,7 @@ def U(p):
 
 pts_all = [U(r[k]) for r in rows for k in ("StartingPOS", "EndingPOS")]
 if gkd:
-    pts_all += [U(c) for c in gkd["pOOB"]["coords"]]
+    pts_all += [U(c) for c in OOB_COORDS]
 A = np.array(pts_all)
 OX, OZ = (A[:, 0].min() + A[:, 0].max()) / 2, (A[:, 2].min() + A[:, 2].max()) / 2
 
@@ -79,10 +82,19 @@ def shot_item(r, kind):
         "tdLie": MAT.get(g.get("materialHit"), g.get("materialHit")),
         "fromCode": r["StartingSurface"], "toCode": r["EndingSurface"],
         "fromLie": LIE.get(r["StartingSurface"], "?"), "toLie": LIE.get(r["EndingSurface"], "?"),
-        "toPin": r["DistanceToPin"], "mph": g["sp"], "vla": g["el"], "hla": g["az"], "spin": g["ts"],
+        "toPin": 0.0 if r["HoleResult"] == 7 else r["DistanceToPin"],   # a holed row gives the distance it started from
+        "mph": g["sp"], "vla": g["el"], "hla": g["az"], "spin": g["ts"],
         "axis": g["sa"], "apexFt": apex * 3.28084, "hazardNo": sd["HazardNumber"],
         "holed": r["HoleResult"] == 7,
     }
+
+
+def auto_putt(r):
+    """GSPro's auto-putts: the ball doesn't move, and the row repeats the shot data of the stroke before it.
+    (Older versions gave them that stroke's shot number instead, which build_items also catches.)"""
+    b = ((r.get("activeShot") or {}).get("sd") or {}).get("BallStartPos")
+    s, e = r["StartingPOS"], r.get("EndingPOS")
+    return bool(b and e) and abs(b["x"] - s["x"]) + abs(b["z"] - s["z"]) > 0.05 and abs(e["x"] - s["x"]) + abs(e["z"] - s["z"]) < 0.05
 
 
 def build_items(hr):
@@ -97,8 +109,15 @@ def build_items(hr):
                           "toPin": r["DistanceToPin"], "ob": r["ShotResult"] == 3})
         elif r["ShotResult"] == 1:
             items.append(shot_item(r, "mulligan"))  # replayed: same stroke number, not counted
-        elif gsn in counted:
+        elif gsn in counted or auto_putt(r):
+            counted.add(gsn)
             items.append({"kind": "putt", "stroke": r["HoleShot"], "gsn": gsn, "holed": r["HoleResult"] == 7})
+            if r["HoleResult"] == 7 and auto_putt(r):
+                # the holing row's distance is the first putt's length; the putts in between aren't recorded
+                first = len(items) - 1
+                while first > 0 and items[first - 1]["kind"] == "putt":
+                    first -= 1
+                items[first]["fromM"] = r["TotalDistance"]
         else:
             counted.add(gsn)
             items.append(shot_item(r, "shot"))
@@ -263,14 +282,15 @@ if gkd:
         for q in ch["teeBoxes"] + ch["pins"] + ch["aims"]:
             samples.append((q[0], q[2], q[1]))
     n_core = len(samples)
-    for hz in gkd["Hazards"]:
-        poly = np.array([T(c) for c in hz["coords"]])
+    for coords in HAZARDS:
+        poly = np.array([T(c) for c in coords])
         hazards.append(poly)
         for q in poly:
             samples.append((q[0], q[2], q[1]))
-    oob = np.array([T(c) for c in gkd["pOOB"]["coords"]])
-    for q in oob:
-        samples.append((q[0], q[2], q[1]))
+    if len(OOB_COORDS) >= 3:
+        oob = np.array([T(c) for c in OOB_COORDS])
+        for q in oob:
+            samples.append((q[0], q[2], q[1]))
 def dedup(a):
     a = np.array(a); key = np.round(a[:, :2] / 2.0).astype(int)
     _, inv = np.unique(key, axis=0, return_inverse=True); inv = inv.ravel(); cnt = np.bincount(inv)
@@ -340,6 +360,13 @@ def lidar_ground(GX, GZ):
     land = wsum > 0.5
     elev = np.where(land, acc / np.maximum(wsum, 1e-9), np.nan)
     sea = al["hOffset"]                                           # lidar 0 m (sea level) in GSPro heights
+    # a gap in the lidar is the sea only on a coast; inland it's the survey's edge or a lake with no ground
+    # returns, so it takes the height of the nearest land rather than dropping to sea level
+    if (~land).any() and land.any() and np.nanmin(elev) > 30:
+        from scipy.ndimage import distance_transform_edt
+        elev = elev[tuple(distance_transform_edt(~land, return_distances=False, return_indices=True))]
+        print(f"lidar gaps inland ({(~land).mean() * 100:.1f}% of cells): filled from the nearest ground")
+        land = np.ones_like(land)
     Hl = np.where(land, al["hScale"] * elev + al["hOffset"], sea - 4.0)
     print(f"lidar ground: {land.mean() * 100:.0f}% land, heights {np.nanmin(Hl):.1f} to {np.nanmax(Hl):.1f} m; "
           f"alignment fit {al['fit'].get('ball', {}).get('median_abs_m', '?')} m median on ball rests")
@@ -679,6 +706,35 @@ if DEM:
         CLS[per_tri(cell_max) < SEA - 1] = 12
     print(f"rock {np.mean(CLS == 10) * 100:.1f}%, shore {np.mean(CLS == 11) * 100:.1f}%, sea {np.mean(CLS == 12) * 100:.1f}% of triangles")
 
+# ---------------------------------------------------------------- what to draw
+# The grid is a rectangle around the course, and one that winds through houses takes in whole neighbourhoods.
+# Only ground within MARGIN of the golf is drawn (shots, the course file's tees, pins, hazards and bounds, and
+# the mapped fairways, greens, tees and bunkers), with the trees and buildings on it. Small pockets enclosed
+# by the course stay, so there are no pits between holes. A course by the sea keeps it all, sea and all.
+MARGIN, POCKET_M2 = 100.0, 40000.0
+KEEP = None
+if SEA is None:
+    from scipy import ndimage as _ndi
+    CX, CZ = np.meshgrid(x0 + (np.arange(nx - 1) + 0.5) * CELL, z0 + (np.arange(nz - 1) + 0.5) * CELL)
+    centres = np.stack([CX.ravel(), CZ.ravel()], 1)
+    golf_pts = np.vstack([S[:, :2]] + ([track_xz] if len(track_xz) else []))
+    cell_keep = cKDTree(golf_pts).query(centres, distance_upper_bound=MARGIN)[0] < MARGIN
+    if OSM_L is not None:
+        golf = shapely.union_all([OSM_L[k] for k in ("fairway", "green", "tee", "bunker")])
+        if not golf.is_empty:
+            cell_keep |= shapely.contains_xy(golf.buffer(MARGIN, quad_segs=4), centres[:, 0], centres[:, 1])
+    cell_keep = cell_keep.reshape(nz - 1, nx - 1)
+    gaps, n_gaps = _ndi.label(~cell_keep)
+    if n_gaps:
+        size = np.bincount(gaps.ravel())
+        edge = np.unique(np.concatenate([gaps[0], gaps[-1], gaps[:, 0], gaps[:, -1]]))
+        small = size * CELL * CELL < POCKET_M2
+        small[0] = False; small[edge] = False
+        cell_keep |= small[gaps]
+    if not cell_keep.all():
+        KEEP = np.repeat(cell_keep.ravel(), 2)          # per triangle, two to a cell, as CLS
+        print(f"drawing {cell_keep.mean() * 100:.0f}% of the ground: within {MARGIN:.0f} m of the golf")
+
 # ---------------------------------------------------------------- trees
 tree_r = None
 if TREES:
@@ -689,6 +745,8 @@ if TREES:
     fx_, fz_ = (TX - x0) / CELL, (TZ - z0) / CELL
     ci = ((np.clip(fz_.astype(int), 0, nz - 2) * (nx - 1) + np.clip(fx_.astype(int), 0, nx - 2)) * 2 + ((fx_ % 1) + (fz_ % 1) > 1)).astype(int)
     ok = inb & ~np.isin(CLS[np.clip(ci, 0, len(CLS) - 1)], (3, 4, 12, 13, 14))     # not on a green, tee, the sea, water or a roof
+    if KEEP is not None:
+        ok &= KEEP[np.clip(ci, 0, len(CLS) - 1)]
     cand = np.stack([TX[ok], TZ[ok]], 1)
     th = np.array(tj["h"])[ok]; tree_r = np.array(tj["r"])[ok]
     kind = (1 - np.array(tj["kind"])[ok]).astype(np.uint8)                      # viewer: 0 cone (columnar), 1 crown (spreading)
@@ -700,6 +758,8 @@ if not TREES:
     ncand = int(area / 140)
     cand = np.stack([rng.uniform(x0 + 15, x1 - 15, ncand), rng.uniform(z0 + 15, z1 - 15, ncand)], 1)
     cc = CLS[near_tree.query(cand)[1]]
+    if KEEP is not None:
+        cc = np.where(KEEP[near_tree.query(cand)[1]], cc, -1)    # no trees off the drawn ground
     woods = vnoise(18)
     wi = np.clip(((cand[:, 0] - x0) / CELL).astype(int), 0, nx - 1); wj = np.clip(((cand[:, 1] - z0) / CELL).astype(int), 0, nz - 1)
     dens = woods[wj, wi]
@@ -736,7 +796,7 @@ if OSM_L is not None:
             if part.area < 12 or b[0] < x0 + 2 or b[1] < z0 + 2 or b[2] > x1 - 2 or b[3] > z1 - 2:
                 continue
             ring = np.array(part.simplify(0.4).exterior.coords)[:-1]
-            if len(ring) < 3:
+            if len(ring) < 3 or (KEEP is not None and not KEEP[near_tree.query(ring)[1]].all()):   # wholly on drawn ground
                 continue
             ground = tri_sample(H, ring[:, 0], ring[:, 1])
             roof = roofs.get(t["@id"])
@@ -879,7 +939,8 @@ def pack_item(it):
         }
     if it["kind"] == "penalty":
         return {"kind": "penalty", "stroke": it["stroke"], "gsn": it["gsn"], "drop": r1(it["drop"]), "dropLie": it["dropLie"], "toPinM": round(it["toPin"], 2), "ob": it.get("ob", False)}
-    return {"kind": "putt", "stroke": it["stroke"], "gsn": it["gsn"], "holed": it["holed"]}
+    return {"kind": "putt", "stroke": it["stroke"], "gsn": it["gsn"], "holed": it["holed"],
+            **({"fromM": round(it["fromM"], 2)} if "fromM" in it else {})}
 
 
 white_sr = (gkd or {}).get(f"{(tee_types[0] or 'White')}SR") if gkd else None
@@ -887,9 +948,9 @@ data = {
     "course": {
         "key": rows[0]["CourseKey"],
         # no course file: tidy the folder key, e.g. HobbleCreek_GSP -> Hobble Creek
-        "name": gkd["CourseName"] if gkd else OSM_NAME or re.sub(r"(?<=[a-z])(?=[A-Z])", " ", re.sub(r"_GSP$", "", rows[0]["CourseKey"])).replace("_", " ").strip(),
+        "name": gkd.get("CourseName") if gkd and gkd.get("CourseName") else OSM_NAME or re.sub(r"(?<=[a-z])(?=[A-Z])", " ", re.sub(r"_GSP$", "", rows[0]["CourseKey"])).replace("_", " ").strip(),
         "gkd": bool(gkd),
-        "location": gkd["Location"] if gkd else "", "designer": gkd["Designer"] if gkd else "",
+        "location": (gkd or {}).get("Location") or "", "designer": (gkd or {}).get("Designer") or "",
         "par": sum(ch["par"] for ch in course_holes),
         "teeType": max(set(t for t in tee_types if t), key=tee_types.count) if any(tee_types) else None,
         "pinDay": max(set(p for p in pin_days if p), key=pin_days.count) if any(pin_days) else None,
@@ -904,6 +965,8 @@ data = {
     "terrain": {"x0": round(x0, 2), "z0": round(z0, 2), "cell": CELL, "nx": nx, "nz": nz,
                 "source": "lidar" if DEM else "fitted", "credit": _opts.get("terrain-credit"), "sea": None if SEA is None else round(float(SEA), 2), "tex": TEX,
                 "h": base64.b64encode(np.round(H * 10).astype(np.int16).tobytes()).decode(),
+                # cells to draw, one bit each, row by row; absent means all of them
+                "keep": None if KEEP is None else base64.b64encode(np.packbits(KEEP[::2])).decode(),
                 "cls": None if TEX else base64.b64encode(CLS.tobytes()).decode()},
     "trees": {"n": len(cand), "xyzh": base64.b64encode(tree_arr.tobytes()).decode(), "kind": base64.b64encode(kind.tobytes()).decode(),
               "r": None if tree_r is None else base64.b64encode(np.clip(np.round(tree_r * 10), 1, 255).astype(np.uint8).tobytes()).decode(),

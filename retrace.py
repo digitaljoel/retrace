@@ -36,9 +36,11 @@ DEFAULTS = {
     "quiet_seconds": 60,
     "idle_minutes": 30,
     "min_holes": 9,
+    "download_early": True, # get a course's map and elevation while its round is played, at the lowest priority
     "locations": {},        # course key -> "lat,lon", for a course whose file doesn't say where it is
 }
 POLL_SECONDS = 5
+EARLY = {}  # course key -> the early download started for it in this watcher (see start_early_download)
 PUBLISH_RETRY_SECONDS = 300
 log = logging.getLogger("retrace")
 
@@ -317,6 +319,7 @@ def prepare_course(cfg, source, course_key):
         else:
             log.warning("%s: no course file in %s, so no location and no real terrain", course_key, courses_dir(cfg) / str(course_key))
         return
+    wait_for_early_download(course_key)    # both would be downloading the same files
     gkd = gkd_file(cfg, course_key)
     args = [sys.executable, str(HERE / "course_data.py"), "--folder", str(course_data_dir(cfg, course_key)), "--lat", str(where[0]), "--lon", str(where[1]),
             "--round", str(source), "--gkd", str(gkd) if gkd else "-"]
@@ -330,6 +333,37 @@ def prepare_course(cfg, source, course_key):
         log.info("%s", done.stdout.strip())
     if done.returncode:
         log.error("%s: course data failed\n%s", course_key, "\n".join(done.stderr.strip().splitlines()[-12:]))
+
+
+def start_early_download(cfg, course_key):
+    """Start getting a course's map and elevation while its round is played, so a finished round has less to wait for.
+    course_data.py --download-only runs in Windows' background mode, so the game comes first."""
+    if not cfg["download_early"] or course_key in EARLY:
+        return
+    EARLY[course_key] = None
+    where, state = course_location(cfg, course_key), course_sources(cfg, course_key)
+    if not where or (state.get("map") and state.get("elevation")):
+        return  # nothing to download, or it was all downloaded before
+    d = course_data_dir(cfg, course_key)
+    d.mkdir(parents=True, exist_ok=True)
+    args = [sys.executable, str(HERE / "course_data.py"), "--folder", str(d), "--lat", str(where[0]), "--lon", str(where[1]), "--download-only"]
+    flags = subprocess.IDLE_PRIORITY_CLASS | subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    with open(d / "early-download.log", "w", encoding="utf-8") as out:
+        EARLY[course_key] = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, cwd=str(HERE), creationflags=flags,
+                                             env=dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8"))
+    log.info("%s: downloading its map and elevation in the background while the round is played", course_key)
+
+
+def wait_for_early_download(course_key):
+    proc = EARLY.get(course_key)
+    if proc is None or proc.poll() is not None:
+        return
+    log.info("%s: waiting for the background download to finish", course_key)
+    try:
+        proc.wait(timeout=3600)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        log.error("%s: the background download timed out", course_key)
 
 
 def course_sources(cfg, course_key):
@@ -382,7 +416,7 @@ def build_page(cfg, source, course_key, round_id, date=None):
         log.error("build timed out: %s", out.name)
         return None
     if done.returncode != 0:
-        log.error("build failed: %s\n%s", out.name, "\n".join(done.stderr.strip().splitlines()[-12:]))
+        log.error("build failed: %s\n%s", out.name, "\n".join(done.stderr.strip().splitlines()[-30:]))
         return None
     log.info("built %s", out)
     make_index.write_index(rounds_dir(cfg))
@@ -462,6 +496,7 @@ class Watcher:
         info = summarize(rows)
         key = str(info["round_id"])
         self.state["current"] = key
+        start_early_download(self.cfg, info["course"])
         rec = self.state["rounds"].get(key)
         if rec and rec["sha"] == sha:
             save_state(self.cfg, self.state)
@@ -673,6 +708,11 @@ def cmd_set(cfg, a):
     elif a.key not in DEFAULTS or a.key == "locations":
         print("unknown setting:", a.key, "\nsettings:", ", ".join(k for k in DEFAULTS if k != "locations"), "or location.<CourseKey>")
         return 1
+    elif isinstance(DEFAULTS[a.key], bool):
+        if a.value.lower() not in ("on", "off", "true", "false", "yes", "no", "1", "0"):
+            print(f"{a.key} is on or off")
+            return 1
+        raw[a.key] = a.value.lower() in ("on", "true", "yes", "1")
     elif isinstance(DEFAULTS[a.key], int):
         raw[a.key] = int(a.value)
     elif a.value:

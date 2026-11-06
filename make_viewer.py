@@ -58,7 +58,9 @@ if a.terrain_credit:
     extra += ["--terrain-credit=" + a.terrain_credit]
 if a.trees_credit:
     extra += ["--trees-credit=" + a.trees_credit]
-subprocess.run([sys.executable, os.path.join(here, "build_round.py"), a.round, gkd, imgs, tmp] + extra, check=True)
+# its own traceback is the useful one, so this exits quietly rather than adding another on top of it
+if subprocess.run([sys.executable, os.path.join(here, "build_round.py"), a.round, gkd, imgs, tmp] + extra).returncode:
+    sys.exit(1)
 data = open(tmp, encoding="utf-8").read()
 meta = json.loads(data)
 out = a.out or os.path.join(here, f"{meta['course']['key'].replace('_GSP', '').lower()}-round-{meta['roundId']}.html")
