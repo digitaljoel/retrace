@@ -321,7 +321,7 @@ def prepare_course(cfg, source, course_key):
         return
     wait_for_early_download(course_key)    # both would be downloading the same files
     gkd = gkd_file(cfg, course_key)
-    args = [sys.executable, str(HERE / "course_data.py"), "--folder", str(course_data_dir(cfg, course_key)), "--lat", str(where[0]), "--lon", str(where[1]),
+    args = [script_python(), str(HERE / "course_data.py"), "--folder", str(course_data_dir(cfg, course_key)), "--lat", str(where[0]), "--lon", str(where[1]),
             "--round", str(source), "--gkd", str(gkd) if gkd else "-"]
     log.info("%s: getting course data for %.5f, %.5f", course_key, *where)
     try:
@@ -346,7 +346,7 @@ def start_early_download(cfg, course_key):
         return  # nothing to download, or it was all downloaded before
     d = course_data_dir(cfg, course_key)
     d.mkdir(parents=True, exist_ok=True)
-    args = [sys.executable, str(HERE / "course_data.py"), "--folder", str(d), "--lat", str(where[0]), "--lon", str(where[1]), "--download-only"]
+    args = [script_python(), str(HERE / "course_data.py"), "--folder", str(d), "--lat", str(where[0]), "--lon", str(where[1]), "--download-only"]
     flags = subprocess.IDLE_PRIORITY_CLASS | subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     with open(d / "early-download.log", "w", encoding="utf-8") as out:
         EARLY[course_key] = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, cwd=str(HERE), creationflags=flags,
@@ -376,7 +376,7 @@ def course_sources(cfg, course_key):
 
 def viewer_args(cfg, source, course_key, out, date=None):
     """make_viewer.py's arguments, using the course folder and whatever course data has been downloaded."""
-    args = [sys.executable, str(HERE / "make_viewer.py"), "--round", str(source), "--out", str(out)]
+    args = [script_python(), str(HERE / "make_viewer.py"), "--round", str(source), "--out", str(out)]
     if date:
         args += ["--date", date]
     course = courses_dir(cfg) / str(course_key)
@@ -392,6 +392,15 @@ def viewer_args(cfg, source, course_key, out, date=None):
         if state.get("buildings"):
             args += ["--buildings", str(d / "buildings.json")]
     return args
+
+
+def script_python():
+    """The Python that runs the build scripts. The watcher runs in pythonw.exe, which has no console; a script
+    started with that passes it on to the scripts it starts in turn, whose errors then go nowhere. So scripts get
+    python.exe, and CREATE_NO_WINDOW keeps it from opening a window."""
+    exe = Path(sys.executable)
+    console = exe.with_name("python.exe")
+    return str(console) if exe.name.lower() == "pythonw.exe" and console.exists() else str(exe)
 
 
 def run_quietly(args, timeout):
