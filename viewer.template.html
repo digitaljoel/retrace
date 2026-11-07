@@ -1932,7 +1932,8 @@ function findHighlights() {
   if (longest) {
     const bomb = out.find(o => o.it === longest.it && o.title.startsWith('Bomb'));
     if (bomb) bomb.sub += ' · longest drive';      // already in the reel: just say so
-    else out.push({ ...longest, tier: 1, val: 4, sub: `${clubName(longest.it.club)} · ${Math.round(longest.it.carryYd)} yd carry, in the fairway`,
+    // a player with bombs has better drives to show than the longest one in the fairway, which may be shorter
+    else if (!out.some(o => o.pi === longest.pi && o.title.startsWith('Bomb'))) out.push({ ...longest, tier: 1, val: 4, sub: `${clubName(longest.it.club)} · ${Math.round(longest.it.carryYd)} yd carry, in the fairway`,
                     title: `Longest drive · ${Math.round(longest.it.totalYd)} yd`, takes: [['dtl', longest.it], ['landing', longest.it]] });
   }
   // everything in the top tier, the best of the rest up to ten moments, then in the order they happened
