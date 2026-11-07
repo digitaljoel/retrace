@@ -9,7 +9,7 @@ Reads the course's latitude/longitude from its .GKD and asks the Overpass API fo
 that someone has mapped in OpenStreetMap will have golf features. Map data (c) OpenStreetMap
 contributors, ODbL.
 """
-import argparse, json, math, os, time, urllib.error, urllib.parse, urllib.request
+import argparse, http.client, json, math, os, time, urllib.error, urllib.parse, urllib.request
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument("--course", help="GSPro course folder (the one holding the .GKD); or give --lat and --lon")
@@ -38,20 +38,37 @@ QUERIES = {
     "cover": f'nwr["natural"]({bb});nwr["landuse"]({bb});nwr["water"]({bb});way["highway"]({bb});nwr["building"]({bb});',
 }
 os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+# the main Overpass server, then a community one; both are free and often busy
+SERVERS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"]
+
+
 def overpass(q):
-    url = "https://overpass-api.de/api/interpreter?" + urllib.parse.urlencode({"data": f"[out:json][timeout:120];({q});out geom;"})
-    # Overpass turns away requests that don't say who they are, and is often busy: back off and retry
-    req = urllib.request.Request(url, headers={"User-Agent": "retrace/0.1 (golf replay viewer)", "Accept": "application/json"})
-    for attempt in range(5):
+    body = urllib.parse.urlencode({"data": f"[out:json][timeout:180];({q});out geom;"}).encode()
+    problem, tries = None, 8   # busy spells usually pass within a few minutes, so keep trying for about ten
+    for attempt in range(tries):
+        server = SERVERS[attempt % len(SERVERS)]
+        # Overpass turns away requests that don't say who they are
+        req = urllib.request.Request(server, data=body, headers={"User-Agent": "retrace/0.1 (golf replay viewer)",
+                                                                  "Accept": "application/json"})
         try:
             with urllib.request.urlopen(req, timeout=200) as r:
-                return r.read()
+                data = r.read()
+            reply = json.loads(data)
+            # an overloaded server can answer 200 with a "remark" and only part of the map, which must not be kept
+            if "runtime error" in reply.get("remark", "") or "elements" not in reply:
+                raise ValueError(reply.get("remark") or "no map in the reply")
+            return data
         except urllib.error.HTTPError as e:
-            if e.code not in (429, 502, 503, 504) or attempt == 4:
+            if e.code not in (429, 500, 502, 503, 504):
                 raise
-            wait = 15 * (attempt + 1)
-            print(f"  Overpass busy (HTTP {e.code}); retrying in {wait} s")
+            problem = f"HTTP {e.code}"
+        except (urllib.error.URLError, http.client.HTTPException, TimeoutError, ConnectionError, ValueError) as e:
+            problem = str(getattr(e, "reason", e))[:200]
+        if attempt < tries - 1:
+            wait = min(15 * 2 ** attempt, 120)
+            print(f"  {urllib.parse.urlsplit(server).hostname} didn't answer ({problem}); trying again in {wait} s", flush=True)
             time.sleep(wait)
+    raise SystemExit(f"couldn't download the OpenStreetMap data after {tries} tries: {problem}")
 
 
 for name, q in QUERIES.items():
