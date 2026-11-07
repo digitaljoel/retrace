@@ -60,7 +60,7 @@ more than 30 minutes mid-round, you'll get a page marked "thru 12", say, and it'
 Rounds under 9 holes are saved but not built. To build one anyway, or to change the timings:
 
 ```powershell
-.venv\Scripts\python.exe retrace.py build "C:\Users\<you>\Retrace\saved\some-round.dat"
+.venv\Scripts\python.exe retrace.py build 131     # a saved round's number, or its file
 .venv\Scripts\python.exe retrace.py set min_holes 6
 .venv\Scripts\python.exe retrace.py set idle_minutes 60
 .venv\Scripts\python.exe retrace.py set quiet_seconds 120
@@ -177,7 +177,7 @@ To restart the watcher: `.venv\Scripts\python.exe retrace.py stop`, then `.venv\
 | `retrace.py open` | Shows your rounds in your browser |
 | `retrace.py stop` | Stops the background watcher |
 | `retrace.py startup on` / `off` | Starts the watcher when you sign in, or doesn't |
-| `retrace.py build [FILE] [--date YYYY-MM-DD]` | Builds one round now, finished or not (default: the current round) |
+| `retrace.py build [ROUND] [--date YYYY-MM-DD]` | Builds one round now, finished or not: a saved round's number or file (default: the current round) |
 | `retrace.py index` | Rebuilds the rounds list from the pages in the folder |
 | `retrace.py publish` | Uploads anything new or changed |
 | `retrace.py merge ROUND ROUND` | Joins two saved rounds into one page, such as when a restart made GSPro split a round in two |

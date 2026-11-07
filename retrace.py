@@ -2,7 +2,7 @@
 
     python retrace.py check                  show what was found and what's missing
     python retrace.py watch                  keep running; build each round when it finishes
-    python retrace.py build [FILE]           build one round now, finished or not
+    python retrace.py build [ROUND]          build one round now (its number or file), finished or not
     python retrace.py open                   show your rounds in your web browser
     python retrace.py index                  rebuild the rounds list (index.html)
     python retrace.py publish                upload new and changed pages to the bucket
@@ -660,6 +660,9 @@ def cmd_watch(cfg, a):
 def cmd_build(cfg, a):
     setup_logging(cfg)
     source = Path(a.file) if a.file else round_file(cfg)
+    if a.file and not source.is_file():   # a round's number, such as 131, picks its saved file
+        matches = sorted((output_dir(cfg) / "saved").glob(f"*-round-{a.file}.dat"))
+        source = matches[0] if matches else source
     if not source.exists():
         log.error("round file not found: %s", source)
         return 1
@@ -909,7 +912,7 @@ def main():
     sub.add_parser("check").set_defaults(fn=cmd_check)
     sub.add_parser("watch").set_defaults(fn=cmd_watch)
     p = sub.add_parser("build")
-    p.add_argument("file", nargs="?", help="a saved round file (default: GSPro's current round)")
+    p.add_argument("file", nargs="?", help="a saved round's number, such as 131, or its file (default: GSPro's current round)")
     p.add_argument("--date", help="date the round was played, YYYY-MM-DD (default: when the file was last written)")
     p.set_defaults(fn=cmd_build)
     sub.add_parser("open").set_defaults(fn=cmd_open)
