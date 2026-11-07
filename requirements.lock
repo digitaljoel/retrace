@@ -23,11 +23,15 @@ numpy==2.5.4
     #   shapely
 pillow==13.0.0
     # via -r requirements.txt
+pyasn1==0.6.1
+    # via rsa
 pyparsing==3.3.3
     # via rasterio
 pyproj==3.8.0
     # via -r requirements.txt
 rasterio==1.5.2
+    # via -r requirements.txt
+rsa==4.9.1
     # via -r requirements.txt
 scipy==1.18.1
     # via -r requirements.txt

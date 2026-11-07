@@ -79,8 +79,9 @@ providers need an account with billing, and setup is more technical than the res
 > the course's files where they exist, so check you're happy to share those. Your saved round files, logs and
 > settings are never uploaded.
 
-Retrace uploads with your own `gcloud` or `aws` command-line tool, so it never handles your cloud password
-or keys. Bucket names are shared worldwide, so pick your own in place of `my-golf-replays-example`.
+Retrace uploads with your own `gcloud` or `aws` command-line tool, or, for Google Cloud, with a service account
+key that you put in its folder (see below). Bucket names are shared worldwide, so pick your own in place of
+`my-golf-replays-example`.
 
 ### Google Cloud Storage
 
@@ -102,6 +103,23 @@ gcloud storage buckets add-iam-policy-binding gs://my-golf-replays-example --mem
 Your rounds are then at `https://storage.googleapis.com/my-golf-replays-example/index.html`. To make it private
 again, remove that access with `remove-iam-policy-binding` and the same two options, then run the first
 command with `--public-access-prevention`.
+
+**Uploading without gcloud.** A `gcloud auth login` sign-in expires, and the GSPro PC doesn't need gcloud at all if
+you give Retrace a service account key instead. You can make it from any PC, in the Google Cloud console:
+
+1. **IAM & Admin > Service Accounts > Create service account.** Name it, say, `retrace-uploader`, and skip the
+   optional role steps.
+2. **Cloud Storage > Buckets >** your bucket **> Permissions > Grant access.** Paste the service account's email
+   and pick **Storage Object Admin** (Retrace replaces pages, which Storage Object Creator can't do).
+3. Open the service account, then **Keys > Add key > Create new key > JSON.**
+4. Copy the downloaded file to the GSPro PC as `%LOCALAPPDATA%\Programs\Retrace\gcp-key.json`, next to
+   `retrace.py`.
+
+That's all: Retrace uses `gcp-key.json` whenever it's there, and the key doesn't expire. `retrace.py check` says
+"with gcp-key.json" under Publishing when the key works. Treat the file like a password: it can write to your
+bucket, so don't email it or put it in a repository, and delete the copy in your Downloads folder. If it's ever
+exposed, delete that key in the console and make a new one. Uninstalling removes it along with the rest of the
+install folder.
 
 ### Amazon S3
 

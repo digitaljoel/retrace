@@ -3,8 +3,10 @@
 *.html
 !viewer.template.html
 
-# Your settings
+# Your settings, and your cloud key, which is a password
 config.json
+gcp-key.json
+*-key.json
 
 # Course data, created by the commands in the README
 lidar/

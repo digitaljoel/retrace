@@ -424,12 +424,93 @@ def build_page(cfg, source, course_key, round_id, date=None):
 
 
 # ---------------------------------------------------------------- publishing
+GCP_KEY = HERE / "gcp-key.json"  # a Google Cloud service account key; with it, uploads need no gcloud
+GCP_TOKEN = {}                   # the access token made from that key, and when it expires
+
+
+def gcp_token():
+    """An access token for Cloud Storage, signed with the service account key. Each lasts an hour."""
+    if GCP_TOKEN.get("expires", 0) > time.time() + 60:
+        return GCP_TOKEN["token"]
+    import base64, urllib.parse, urllib.request
+    import rsa
+    from pyasn1.codec.der import decoder
+    try:
+        key = json.loads(GCP_KEY.read_text(encoding="utf-8-sig"))
+        pem = key["private_key"]
+        der = base64.b64decode("".join(l for l in pem.splitlines() if l and not l.startswith("-----")))
+        # Google's keys are PKCS#8, which wraps the PKCS#1 key that rsa reads
+        private = rsa.PrivateKey.load_pkcs1(bytes(decoder.decode(der)[0][2]), "DER")
+        email, token_uri = key["client_email"], key.get("token_uri") or "https://oauth2.googleapis.com/token"
+    except (OSError, ValueError, KeyError, IndexError, TypeError) as e:
+        raise RuntimeError(f"{GCP_KEY.name} isn't a usable service account key ({e}); download a new JSON key")
+    b64 = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=")
+    now = int(time.time())
+    claims = {"iss": email, "scope": "https://www.googleapis.com/auth/devstorage.read_write",
+              "aud": token_uri, "iat": now, "exp": now + 3600}
+    unsigned = b64(json.dumps({"alg": "RS256", "typ": "JWT"}).encode()) + b"." + b64(json.dumps(claims).encode())
+    jwt = unsigned + b"." + b64(rsa.sign(unsigned, private, "SHA-256"))
+    body = urllib.parse.urlencode({"grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                                   "assertion": jwt.decode()}).encode()
+    reply = json.loads(http(urllib.request.Request(token_uri, data=body), "sign in to Google Cloud"))
+    GCP_TOKEN.update(token=reply["access_token"], expires=time.time() + int(reply.get("expires_in", 3600)))
+    return GCP_TOKEN["token"]
+
+
+def http(request, doing, timeout=300):
+    import ssl, urllib.error, urllib.request
+    try:
+        import certifi
+        context = ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        context = ssl.create_default_context()
+    try:
+        with urllib.request.urlopen(request, timeout=timeout, context=context) as r:
+            return r.read()
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "replace")
+        try:
+            detail = json.loads(detail).get("error_description") or json.loads(detail)["error"]["message"]
+        except (ValueError, KeyError, TypeError, AttributeError):
+            pass
+        raise RuntimeError(f"couldn't {doing}: {e.code} {str(detail)[:300]}")
+    except (urllib.error.URLError, OSError) as e:
+        raise RuntimeError(f"couldn't {doing}: {getattr(e, 'reason', e)}")
+
+
+def gcs_upload(target, path):
+    """Upload one page with the service account key, like gcloud storage cp would."""
+    import urllib.parse, urllib.request
+    bucket, _, folder = target[len("gs://"):].partition("/")
+    name = f"{folder.strip('/')}/{path.name}" if folder.strip("/") else path.name
+    meta = json.dumps({"name": name, "contentType": "text/html", "cacheControl": "no-cache"}).encode()
+    boundary = "retrace" + hashlib.sha1(os.urandom(16)).hexdigest()
+    body = b"".join([f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n".encode(), meta,
+                     f"\r\n--{boundary}\r\nContent-Type: text/html\r\n\r\n".encode(), path.read_bytes(),
+                     f"\r\n--{boundary}--\r\n".encode()])
+    url = (f"https://storage.googleapis.com/upload/storage/v1/b/{urllib.parse.quote(bucket, safe='')}/o"
+           "?uploadType=multipart")
+    request = urllib.request.Request(url, data=body, method="POST", headers={
+        "Authorization": f"Bearer {gcp_token()}", "Content-Type": f"multipart/related; boundary={boundary}"})
+    http(request, f"upload {path.name}", timeout=900)
+
+
+def upload(target, path):
+    """Upload one page, raising RuntimeError if it didn't work."""
+    if target.startswith("gs://") and GCP_KEY.exists():
+        gcs_upload(target, path)
+        return
+    done = run_quietly(upload_command(target, path), timeout=900)
+    if done.returncode != 0:
+        raise RuntimeError(done.stderr.strip()[-800:])
+
+
 def upload_command(target, path):
     dest = f"{target.rstrip('/')}/{path.name}"
     if target.startswith("gs://"):
         tool = shutil.which("gcloud")
         if not tool:
-            raise RuntimeError("the gcloud command isn't installed or isn't on PATH")
+            raise RuntimeError(f"no {GCP_KEY.name} next to retrace.py, and the gcloud command isn't installed")
         return [tool, "storage", "cp", str(path), dest, "--cache-control=no-cache", "--content-type=text/html"]
     if target.startswith("s3://"):
         tool = shutil.which("aws")
@@ -458,12 +539,9 @@ def publish(cfg, state):
         if state["published"].get(path.name) == signature:
             continue
         try:
-            done = run_quietly(upload_command(target, path), timeout=900)
+            upload(target, path)
         except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
             log.error("upload failed: %s: %s", path.name, e)
-            return False
-        if done.returncode != 0:
-            log.error("upload failed: %s\n%s", path.name, done.stderr.strip()[-800:])
             return False
         state["published"][path.name] = signature
         save_state(cfg, state)
@@ -808,8 +886,12 @@ def cmd_check(cfg, a):
     target = cfg["publish_to"]
     if target:
         try:
-            upload_command(target, Path("x"))
-            line(True, "Publishing to", target)
+            if target.startswith("gs://") and GCP_KEY.exists():
+                gcp_token()  # proves the key works, without uploading anything
+                line(True, "Publishing to", f"{target}, with {GCP_KEY.name}")
+            else:
+                upload_command(target, Path("x"))
+                line(True, "Publishing to", target)
         except RuntimeError as e:
             line(False, "Publishing to " + target, e)
     else:
