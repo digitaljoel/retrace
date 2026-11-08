@@ -351,3 +351,15 @@ mostly low kiawe. The point cloud's heights are on a different reference from th
 - Rows that repeat the last shot's `GlobalShotNumber` are auto-putts (no putt path).
 - Club 26 with no flight points is a real putt (roll path only).
 - `DistanceToPin` is metres from where the ball came to rest after the shot.
+
+## License
+
+Copyright (C) 2026 Joel Weight.
+
+Retrace is free software: you can redistribute it and/or modify it under the terms of the GNU General Public
+License, version 3, as published by the Free Software Foundation. It comes with no warranty. See
+[LICENSE](LICENSE) for the full terms. In short: you may use, change and share it, even for money, but anything you
+share that's built from it must also be under GPL-3.0, with its source code.
+
+This covers Retrace's own code. The data it downloads keeps its own terms: OpenStreetMap data is (c)
+OpenStreetMap contributors under the ODbL, and the credits above list the rest.
