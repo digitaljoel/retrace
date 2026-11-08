@@ -26,10 +26,12 @@ yet, so Windows doesn't recognize it. You can read `install.ps1` first to see ex
 on the 18th, double-click **Retrace Rounds** on your desktop to see your rounds in your browser.
 
 To update, download the new zip and run **Install.bat** again; your rounds and settings stay. To remove Retrace, run
-**Uninstall.bat** in `%LOCALAPPDATA%\Programs\Retrace`. Your rounds stay in `C:\Users\<you>\Retrace` until you delete them.
+**Uninstall.bat** in `%LOCALAPPDATA%\Programs\Retrace`. That removes the whole folder, including your settings and
+any cloud key in it. Your rounds stay in `C:\Users\<you>\Retrace` until you delete them.
 
 Setup finds your GSPro courses on its own, even if GSPro isn't in the usual place. If it can't, it asks you for the
-folder; you can also skip that and see the next section.
+folder; you can also skip that and see the next section. Nothing else needs setting up; to change how Retrace
+works, see [Settings](#settings).
 
 ## Where Retrace looks for GSPro
 
@@ -42,7 +44,43 @@ folder; you can also skip that and see the next section.
 `AppData` is a hidden folder. To find it, paste `%USERPROFILE%\AppData\LocalLow` into File Explorer's address
 bar. If you moved your courses, the location is in GSPro under **Settings > Game > Course Folder**.
 
-These are commands; see [Commands](#commands) for how to run them. After changing a setting, restart your PC or the watcher.
+These are commands; see [Commands](#commands) for how to run them, or edit the settings file instead (see
+[Settings](#settings)).
+
+## Settings
+
+Your settings are in `%LOCALAPPDATA%\Programs\Retrace\config.json`. Paste that into File Explorer's address bar
+to open it, or open it in Notepad. You can edit it by hand, or use `retrace.py set SETTING VALUE`, which changes
+the same file. Setup usually creates it when it finds your courses; if it isn't there, create it with Notepad.
+Only the settings you change need to be in it, for example:
+
+```json
+{
+  "courses_dir": "D:/gspro/Core/GSP/Courses",
+  "publish_to": "gs://my-golf-replays-example",
+  "idle_minutes": 45,
+  "locations": {
+    "Some_Course_GSP": "40.1608,-111.5121"
+  }
+}
+```
+
+| Setting | What it does | Default |
+|---|---|---|
+| `round_file` | GSPro's round file | found for you |
+| `courses_dir` | GSPro's Courses folder | found for you |
+| `output_dir` | Where your rounds, saved round files, course data and log go | `C:\Users\<you>\Retrace` |
+| `publish_to` | A bucket to upload pages to, `gs://...` or `s3://...` (see below) | `""`, off |
+| `quiet_seconds` | How long the round file must be unchanged after the 18th hole before the page is built | `60` |
+| `idle_minutes` | How long a round of fewer holes must be left before it's built | `30` |
+| `min_holes` | The fewest holes that get a page | `9` |
+| `download_early` | Download a new course's map and elevation while its round is played | `true` |
+| `locations` | Latitude and longitude for courses whose course file has none, by course key | none |
+
+It's JSON, so text goes in double quotes, and on/off settings are `true` or `false`. In folder paths, use forward
+slashes (`D:/gspro/...`) or doubled backslashes (`D:\\gspro\\...`); a single backslash breaks the file. After
+changing it, restart the watcher: run **Install.bat** again, or sign out of Windows and back in. Your settings
+survive updates.
 
 ## How it knows a round is over
 
@@ -85,7 +123,10 @@ key that you put in its folder (see below). Bucket names are shared worldwide, s
 
 ### Google Cloud Storage
 
-Install the [gcloud CLI](https://cloud.google.com/sdk/docs/install), run `gcloud auth login`, then:
+There are two ways to let Retrace upload: the gcloud command-line tool, set up just below, or a key file, which
+needs nothing installed on the GSPro PC (see **Uploading without gcloud**, after this).
+
+With gcloud: install the [gcloud CLI](https://cloud.google.com/sdk/docs/install), run `gcloud auth login`, then:
 
 ```powershell
 gcloud storage buckets create gs://my-golf-replays-example --location=us-central1 --uniform-bucket-level-access --public-access-prevention
@@ -105,17 +146,25 @@ again, remove that access with `remove-iam-policy-binding` and the same two opti
 command with `--public-access-prevention`.
 
 **Uploading without gcloud.** A `gcloud auth login` sign-in expires, and the GSPro PC doesn't need gcloud at all if
-you give Retrace a service account key instead. You can make it from any PC, in the Google Cloud console:
+you give Retrace a service account key instead. You can do all of this from any PC, in the
+[Google Cloud console](https://console.cloud.google.com/):
 
-1. **IAM & Admin > Service Accounts > Create service account.** Name it, say, `retrace-uploader`, and skip the
+1. **Cloud Storage > Buckets > Create.** Pick a name and a region, and leave **Enforce public access
+   prevention** on for now. (Skip this if you made the bucket with gcloud above.)
+2. **IAM & Admin > Service Accounts > Create service account.** Name it, say, `retrace-uploader`, and skip the
    optional role steps.
-2. **Cloud Storage > Buckets >** your bucket **> Permissions > Grant access.** Paste the service account's email
+3. **Cloud Storage > Buckets >** your bucket **> Permissions > Grant access.** Paste the service account's email
    and pick **Storage Object Admin** (Retrace replaces pages, which Storage Object Creator can't do).
-3. Open the service account, then **Keys > Add key > Create new key > JSON.**
-4. Copy the downloaded file to the GSPro PC as `%LOCALAPPDATA%\Programs\Retrace\gcp-key.json`, next to
+4. Open the service account, then **Keys > Add key > Create new key > JSON.**
+5. Copy the downloaded file to the GSPro PC as `%LOCALAPPDATA%\Programs\Retrace\gcp-key.json`, next to
    `retrace.py`.
+6. Set `publish_to` to your bucket, as `gs://your-bucket-name`, in the [settings file](#settings) or with
+   `retrace.py set publish_to gs://your-bucket-name`, and restart the watcher.
 
-That's all: Retrace uses `gcp-key.json` whenever it's there, and the key doesn't expire. `retrace.py check` says
+To share the bucket, open its **Permissions** tab, turn off public access prevention, then **Grant access** to
+`allUsers` with the **Storage Object Viewer** role.
+
+Retrace uses `gcp-key.json` whenever it's there, and the key doesn't expire. `retrace.py check` says
 "with gcp-key.json" under Publishing when the key works. Treat the file like a password: it can write to your
 bucket, so don't email it or put it in a repository, and delete the copy in your Downloads folder. If it's ever
 exposed, delete that key in the console and make a new one. Uninstalling removes it along with the rest of the
@@ -276,9 +325,12 @@ To build a page by hand with `make_viewer.py`:
 
 ### Highlights
 The Highlights button at the top (or H) plays the round's best moments in order, picked from the round
-when the page loads: aces, eagles, hole-outs and bomb drives first, then stuck-it approaches and birdies
-(the approach, then the putt rolling in) and the round's longest drive (the longest that finished in
-the fairway; if it was a bomb, the bomb's card says so), then long putts holed. In rounds with more than
+when the page loads: aces, eagles, shots holed from off the green and bomb drives (240+ yd carry) first,
+then stuck-it approaches, tap-ins (any shot from off the green that stops within 24 inches), birdies (the
+approach, then the putt rolling in) and the round's longest drive, then long putts holed. The longest drive
+is the longest that finished in the fairway; if it was a bomb, the bomb's card says so, and a player with any
+bombs doesn't get a separate card for it, since a bomb that ran into the rough can be longer. A shot that ends
+in a penalty is never a highlight. In rounds with more than
 one player, the card leads with the player's name in their colour and the replayed shot is drawn in it. The
 best shots play from several angles, cut together under a title card: down the line, a chase cam behind
 bomb drives, a slow-motion landing view, and a slow-motion view from the green. Pressing anything else
@@ -288,8 +340,9 @@ The sun/moon button on the hole card switches between light and dark; the choice
 that browser. Otherwise the page follows the system setting.
 
 ### Celebrations in the replay
-- A tee shot that carries 240+ yd explodes off the tee and flies as a fireball.
-- An approach from 50+ yd that finishes inside 10 ft (the target grows to exactly 10 ft), or any shot holed from off the green.
+- A tee shot that carries 240+ yd explodes off the tee and flies as a fireball, unless it ends in a penalty.
+- An approach from 50+ yd that finishes inside 10 ft (the target grows to exactly 10 ft), any shot from off the
+  green that stops within 24 inches, or any shot holed from off the green.
 - Birdie, eagle, albatross and hole in one each fly something out of the cup.
   Press 1-4 on a hole to preview them.
 
@@ -348,9 +401,14 @@ mostly low kiawe. The point cloud's heights are on a different reference from th
   3 out of bounds / lost ball (the row ends back where the shot was played from, stroke and distance;
   the page shows it as "OB · re-hit").
 - `HoleResult`: 7 holed, 3 in play, 2 tee shot finished on a par-3 green.
-- Rows that repeat the last shot's `GlobalShotNumber` are auto-putts (no putt path).
+- Auto-putts have no putt path. Older GSPro versions gave them the last shot's `GlobalShotNumber`; newer ones
+  give them their own, copy the previous stroke's shot data, and leave the ball where it was. The row that holes
+  out gives the first putt's length in `TotalDistance` (metres).
 - Club 26 with no flight points is a real putt (roll path only).
-- `DistanceToPin` is metres from where the ball came to rest after the shot.
+- `DistanceToPin` is metres from where the ball came to rest after the shot, except on the row that holes out,
+  where it's the distance the shot started from.
+- In the `.GKD`, a tee or pin that isn't used has no position: (0, 0, 0) in older course files, `null` in newer
+  ones, even on some enabled tees. Some course files also have no out-of-bounds line or hazards.
 
 ## License
 
