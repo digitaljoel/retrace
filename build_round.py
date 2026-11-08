@@ -206,25 +206,29 @@ for hidx in hole_ids:
     entry = {"n": hidx + 1, "par": hrows[0]["HolePar"], "index": None, "aims": [], "pins": [], "teeBoxes": []}
     gh = gkd["Holes"][hidx] if gkd and hidx < len(gkd["Holes"]) else None
     if gh:
-        entry["index"] = gh["Index"]
-        tees = [t for t in gh["Tees"] if t["Enabled"] and t["TeeType"] in STD_TEES and (t["Position"]["x"] or t["Position"]["z"])]
-        played = min(tees, key=lambda t: np.linalg.norm(xz(T(t["Position"])) - xz(first[0])))
-        dt = np.linalg.norm(xz(T(played["Position"])) - xz(first[0]))
+        entry["index"] = gh.get("Index")
+        # an unused tee or pin has no position: (0, 0, 0) in older course files, null in newer ones
+        placed = lambda t: isinstance(t.get("Position"), dict) and bool(t["Position"].get("x") or t["Position"].get("z"))
+        gtees = [t for t in gh.get("Tees") or [] if t.get("Enabled") and placed(t)]
+        tees = [t for t in gtees if t.get("TeeType") in STD_TEES]
+        gpins = [p for p in gh.get("Pins") or [] if isinstance(p.get("Position"), dict)]
+        played = min(tees, key=lambda t: np.linalg.norm(xz(T(t["Position"])) - xz(first[0]))) if tees else None
+        dt = np.linalg.norm(xz(T(played["Position"])) - xz(first[0])) if played else np.inf
         entry["tee"] = T(played["Position"]) if dt < 4 else first[0]
         entry["teeType"] = played["TeeType"] if dt < 4 else None
         entry["yards"] = played["Distance"] * YD if dt < 4 else None
         entry["teeBoxes"] = [T(t["Position"]) for t in tees]
-        entry["aims"] = [T(t["Position"]) for t in gh["Tees"] if t["TeeType"].startswith("AimPoint") and t["Enabled"] and (t["Position"]["x"] or t["Position"]["z"])]
-        entry["pins"] = [T(p["Position"]) for p in gh["Pins"]]
-        best = None
+        entry["aims"] = [T(t["Position"]) for t in gtees if str(t.get("TeeType", "")).startswith("AimPoint")]
+        entry["pins"] = [T(p["Position"]) for p in gpins]
+        best = (None, np.inf)
         E = np.array([p[0] for p in pairs]); rr = np.array([p[1] for p in pairs])
-        for p in gh["Pins"]:
+        for p in gpins:
             P = xz(T(p["Position"]))
             res = float(np.abs(np.linalg.norm(E - P, axis=1) - rr).max())
-            if best is None or res < best[1]:
+            if res < best[1]:
                 best = (p, res)
         if best[1] < 3.0:
-            entry["pin"] = T(best[0]["Position"]); entry["pinDay"] = best[0]["Day"]; entry["pinResid"] = best[1]
+            entry["pin"] = T(best[0]["Position"]); entry["pinDay"] = best[0].get("Day"); entry["pinResid"] = best[1]
         tee_types.append(entry["teeType"]); pin_days.append(entry.get("pinDay"))
     else:
         entry["tee"] = first[0]
