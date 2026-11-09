@@ -108,6 +108,11 @@ try {
     Step "Looking for your GSPro courses (this can take up to a minute)..."
     $ErrorActionPreference = "Continue"
     & $Python $Retrace find-courses 2>&1 | ForEach-Object { Step "  $_" }
+    if ($LASTEXITCODE -eq 3) {
+        # retrace.py's exit code for a settings file it can't use; it has just said what's wrong
+        $SettingsProblem = $true
+        throw "Your settings file, $(Join-Path $InstallDir 'config.json'), has a mistake in it (see above). Fix it in Notepad, or delete it, then run Install.bat again."
+    }
     while ($LASTEXITCODE -ne 0) {
         # the only question setup ever asks; pressing Enter skips it, and with no one there to answer it's skipped too
         Write-Host ""
@@ -148,6 +153,6 @@ try {
 catch {
     Write-Host ""
     Write-Host "Setup didn't finish: $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "Check your internet connection and run Install.bat again. It's safe to run more than once."
+    if (-not $SettingsProblem) { Write-Host "Check your internet connection and run Install.bat again. It's safe to run more than once." }
     exit 1
 }

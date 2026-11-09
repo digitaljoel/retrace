@@ -46,10 +46,31 @@ log = logging.getLogger("retrace")
 
 
 # ---------------------------------------------------------------- settings and paths
+class ConfigError(Exception):
+    """config.json can't be used; the message says what's wrong and how to fix it."""
+
+
+CONFIG_ERROR_EXIT = 3   # distinct from argparse's 2, so the installer can tell a broken settings file apart
+
+
 def load_config():
     cfg = json.loads(json.dumps(DEFAULTS))
-    if CONFIG.exists():
-        cfg.update(json.loads(CONFIG.read_text(encoding="utf-8-sig")))
+    raw = load_config_file()
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{CONFIG} must hold settings between {{ and }}; see the Settings section of the README.")
+    for key, value in raw.items():
+        if key not in DEFAULTS:
+            continue  # an old or misspelt setting does no harm, and check lists it
+        want = DEFAULTS[key]
+        ok = (isinstance(value, bool) if isinstance(want, bool) else
+              isinstance(value, int) and not isinstance(value, bool) if isinstance(want, int) else
+              isinstance(value, dict) and all(isinstance(v, str) for v in value.values()) if isinstance(want, dict) else
+              isinstance(value, str))
+        if not ok:
+            kind = ("true or false" if isinstance(want, bool) else "a whole number, with no quotes" if isinstance(want, int) else
+                    'course keys and "lat,lon" text, between { and }' if isinstance(want, dict) else "text in double quotes")
+            raise ConfigError(f'{CONFIG}: "{key}" is {json.dumps(value)}, but it should be {kind}.')
+    cfg.update(raw)
     return cfg
 
 
@@ -817,7 +838,29 @@ def cmd_set(cfg, a):
 
 
 def load_config_file():
-    return json.loads(CONFIG.read_text(encoding="utf-8-sig")) if CONFIG.exists() else {}
+    """config.json's own contents, without the defaults. Raises ConfigError if it isn't valid JSON."""
+    if not CONFIG.exists():
+        return {}
+    try:
+        text = CONFIG.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError) as e:
+        raise ConfigError(f"couldn't read {CONFIG}: {e}")
+    if not text.strip():
+        return {}
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        lines = text.splitlines()
+        # a missing comma shows up at the start of the next line, so the line before is shown too
+        shown = "".join(f"    line {n}: {lines[n - 1].strip()}\n" for n in (e.lineno - 1, e.lineno) if 0 < n <= len(lines))
+        hint = ""
+        if "escape" in e.msg:
+            hint = ' In folder paths, use forward slashes (D:/gspro/...) or doubled backslashes (D:\\\\gspro\\\\...).'
+        elif "delimiter" in e.msg or "Expecting property name" in e.msg:
+            hint = (" Check for a missing comma at the end of the line before, an extra comma before a }, and that every"
+                    " name and text value is in double quotes.")
+        raise ConfigError(f"{CONFIG} isn't valid, at line {e.lineno}, column {e.colno}: {e.msg}.{hint}\n{shown}"
+                          "Fix it in Notepad, or delete the file to go back to the defaults (Retrace finds your courses again).")
 
 
 def startup_file():
@@ -873,6 +916,8 @@ def cmd_check(cfg, a):
             line(True, f"Python package {pip_name}")
         except ImportError:
             line(False, f"Python package {pip_name}", "missing; run Install.bat again")
+    unknown = [k for k in load_config_file() if k not in DEFAULTS]
+    line(None if unknown else True, "Settings", f"{CONFIG}" + (f"; not settings, so ignored: {', '.join(unknown)}" if unknown else ""))
     rf = round_file(cfg)
     if rf.exists():
         line(True, "Round file", rf)
@@ -942,7 +987,15 @@ def main():
     p.set_defaults(fn=cmd_startup)
     sub.add_parser("stop").set_defaults(fn=cmd_stop)
     a = ap.parse_args()
-    sys.exit(a.fn(load_config(), a))
+    try:
+        cfg = load_config()
+    except ConfigError as e:
+        # the watcher has no window, so the log is where this gets seen; it's the default log, as the
+        # settings file is what would have said where else to put it
+        setup_logging(json.loads(json.dumps(DEFAULTS)))
+        log.error("your settings can't be used, so Retrace can't run:\n%s", e)   # in a console, it shows there too
+        sys.exit(CONFIG_ERROR_EXIT)
+    sys.exit(a.fn(cfg, a))
 
 
 if __name__ == "__main__":

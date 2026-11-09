@@ -239,6 +239,10 @@ To restart the watcher: `.venv\Scripts\python.exe retrace.py stop`, then `.venv\
 file is found. Then read `C:\Users\<you>\Retrace\retrace.log`, which records every round seen, page built,
 upload and error.
 
+**Retrace stopped after you edited the settings.** A mistake in `config.json` stops Retrace, and
+`retrace.log` (or `check`, or Install.bat) says which line is wrong and why. Fix it in Notepad, or delete the
+file to go back to the defaults, then run **Install.bat** again.
+
 **The round file isn't found, but you've played.** Search `LocalLow` for `currentRound.dat` and give Retrace
 the path with `set round_file`.
 
