@@ -75,7 +75,7 @@ Only the settings you change need to be in it, for example:
 | `idle_minutes` | How long a round of fewer holes must be left before it's built | `30` |
 | `min_holes` | The fewest holes that get a page | `9` |
 | `download_early` | Download a new course's map and elevation while its round is played | `true` |
-| `locations` | Latitude and longitude for courses whose course file has none, by course key | none |
+| `locations` | Latitude and longitude for courses whose course file has none or the wrong one, by course key | none |
 
 It's JSON, so text goes in double quotes, and on/off settings are `true` or `false`. In folder paths, use forward
 slashes (`D:/gspro/...`) or doubled backslashes (`D:\\gspro\\...`); a single backslash breaks the file. After
@@ -253,6 +253,13 @@ both parts, the one that finished it is used.
 **The page has few course details.** "No .GKD file" in `check` means Retrace couldn't find that course's folder,
 so the page is built from shot data alone. Check `courses_dir`, then rebuild the round from `saved`.
 
+**The page has no real terrain or map.** After each build, `retrace.log` says what the page got and, if
+something is missing, why: no public lidar there, a download that failed (tried again next round), terrain that
+didn't line up with your shots, or no golf course mapped at the course's location. That last one usually means the
+course file puts the course in the wrong place. Find the course on a map, give Retrace its real location (see
+**Real terrain, greens and trees** below), and rebuild with `retrace.py build <round number>`. Its map and terrain
+are downloaded again for the new location.
+
 **A build failed.** The reason is in `retrace.log`. A failed round is tried again if it changes or the watcher
 restarts. Please include the error if you open an issue, but look it over first and leave out anything private.
 
@@ -290,11 +297,13 @@ download fails, for example with no internet, that round's page gets whatever wo
 course tries again. Everything is kept in `C:\Users\<you>\Retrace\course-data`; delete a course's folder there to
 download it fresh.
 
-If a course file has no location, you can give it one, using the course key `check` shows:
+If a course file has no location, or the wrong one, you can give it one, using the course key `check` shows:
 
 ```powershell
 .venv\Scripts\python.exe retrace.py set location.Some_Course_GSP "40.1608,-111.5121"
 ```
+
+Any point on the course will do; the clubhouse is fine.
 
 Credits: map data (c) OpenStreetMap contributors (ODbL); lidar from the USGS 3D Elevation Program; terrain tiles
 from Mapzen and the AWS Terrain Tiles dataset; canopy heights from Meta and the World Resources Institute (CC BY 4.0).

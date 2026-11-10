@@ -349,11 +349,40 @@ def prepare_course(cfg, source, course_key):
         done = run_quietly(args, timeout=3600)
     except subprocess.TimeoutExpired:
         log.error("%s: course data timed out", course_key)
+    else:
+        if done.stdout.strip():
+            log.info("%s", done.stdout.strip())
+        if done.returncode:
+            log.error("%s: course data failed\n%s", course_key, "\n".join(done.stderr.strip().splitlines()[-12:]))
+    report_course(cfg, course_key, where)
+
+
+def report_course(cfg, course_key, where):
+    """Say plainly what the page will have of the real course, and why not when something's missing."""
+    s, k = course_sources(cfg, course_key), course_key
+    if not s.get("map"):
+        log.warning("%s: couldn't download the OpenStreetMap data, so the page has no map of the course; "
+                    "it's tried again with the next round here", k)
+    elif s.get("golf") == 0:
+        log.warning("%s: OpenStreetMap has no golf course mapped within about 2.5 km of %.5f, %.5f, the location in its "
+                    "course file. Either nobody has mapped the course, or that location is wrong. If it's wrong, find the "
+                    "course on a map and put its latitude and longitude under \"locations\" in %s (see Settings in the "
+                    "README), then rebuild the round with: retrace.py build <round number>", k, where[0], where[1], CONFIG)
+    if s.get("elevation") == "lidar":
+        terrain = "public USGS lidar"
+    elif s.get("elevation") == "tiles":
+        terrain = "5 m worldwide terrain tiles" + {0: " (no public lidar covers it)"}.get(s.get("surveys"), "")
+    else:
+        log.warning("%s: no elevation could be downloaded (%s), so the page uses generated terrain; "
+                    "it's tried again with the next round here", k, s.get("elevation_problem", "see above"))
         return
-    if done.stdout.strip():
-        log.info("%s", done.stdout.strip())
-    if done.returncode:
-        log.error("%s: course data failed\n%s", course_key, "\n".join(done.stderr.strip().splitlines()[-12:]))
+    if s.get("aligned"):
+        log.info("%s: the page has the real terrain, from %s%s%s", k, terrain, ", and the map" if s.get("map") else "",
+                 ", and real trees" if s.get("trees") else "")
+    else:
+        log.warning("%s: the course couldn't be lined up with the real terrain from %s (alignment %s), so the page uses "
+                    "generated terrain and no map, rather than showing them in the wrong place. Another round here tries again.",
+                    k, terrain, s.get("alignment", "rejected"))
 
 
 def start_early_download(cfg, course_key):
@@ -434,6 +463,9 @@ def run_quietly(args, timeout):
                           errors="replace", timeout=timeout, creationflags=flags, env=env, cwd=str(HERE))
 
 
+BUILD_NOTES = ("lidar ", "OSM ", "course name from the map", "drawing ", "trees", "buildings")
+
+
 def build_page(cfg, source, course_key, round_id, date=None):
     """Build one page and refresh the index. Returns the page's path, or None if the build failed."""
     out = rounds_dir(cfg) / f"{stem_for(course_key, round_id)}.html"
@@ -448,6 +480,10 @@ def build_page(cfg, source, course_key, round_id, date=None):
     if done.returncode != 0:
         log.error("build failed: %s\n%s", out.name, "\n".join(done.stderr.strip().splitlines()[-30:]))
         return None
+    # what the page builder made of the terrain and the map, as it can still leave parts out
+    notes = [ln.strip() for ln in done.stdout.splitlines() if ln.strip().startswith(BUILD_NOTES)]
+    if notes:
+        log.info("%s:\n  %s", out.name, "\n  ".join(notes))
     log.info("built %s", out)
     make_index.write_index(rounds_dir(cfg))
     return out

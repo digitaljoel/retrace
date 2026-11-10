@@ -664,7 +664,10 @@ elif OSM:
             OSM_L["green"] = shapely.union(OSM_L["green"], patch)
             print(f"hole {ch['n']}: pin {gap:.1f} m off the mapped green; stretched the green to take it in")
     covered = [any(shapely.contains_xy(OSM_L["green"], *xz(pp)) for pp in ch["pins"]) for ch in course_holes]
-    print(f"OSM covers {sum(covered)} of {len(covered)} holes" + ("" if all(covered) else f"; keeping the approximations on holes {[i + 1 for i, c in enumerate(covered) if not c]}"))
+    if OSM_L["green"].is_empty:
+        print("OSM has no greens mapped for this course, so its greens and fairways are approximated from the round")
+    else:
+        print(f"OSM covers {sum(covered)} of {len(covered)} holes" + ("" if all(covered) else f"; keeping the approximations on holes {[i + 1 for i, c in enumerate(covered) if not c]}"))
     keep_old = shapely.union_all([_LS(ch["route"]).buffer(90) for ch, c in zip(course_holes, covered) if not c] or [_Poly()])
     if not gkd:   # no course file: take the course's name from the map, the mapped course that holds the most pins
         pins_now = shapely.points(np.array([(ch["pin"][0] + OX, OZ - ch["pin"][2]) for ch in course_holes]) - shift)

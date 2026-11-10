@@ -119,8 +119,8 @@ def tiles_dem(lat, lon, path, z=15, res=5.0):
         d.write(Z, 1)
 
 
-def alignment_holds(path):
-    """Whether a solved alignment agrees with where the balls landed."""
+def alignment_holds(path, state=None):
+    """Whether a solved alignment agrees with where the balls landed. The reason goes in state["alignment"]."""
     al = json.loads(Path(path).read_text(encoding="utf-8"))
     q = al.get("quality") or {}
     ball = (al.get("fit", {}).get("ball") or {}).get("median_abs_m", 99)
@@ -132,7 +132,33 @@ def alignment_holds(path):
     else:
         verdict, why = ball <= 0.5, f"balls within {ball:.2f} m of the ground"
     print(f"  alignment {'accepted' if verdict else 'rejected'}: {why}", flush=True)
+    if state is not None:
+        state["alignment"] = f"{'accepted' if verdict else 'rejected'}: {why}"
     return verdict
+
+
+def golf_features(path):
+    """How many golf features (greens, fairways, the course outline...) the downloaded map has."""
+    try:
+        els = json.loads(Path(path).read_text(encoding="utf-8"))["elements"]
+    except (OSError, ValueError, KeyError):
+        return None
+    return sum(1 for e in els if "golf" in e.get("tags", {}) or e.get("tags", {}).get("leisure") == "golf_course")
+
+
+CACHED = ["osm_golf.json", "osm_cover.json", "osm_shift.json", "shift.json", "elevation.tif", "tiles.tif", "align.json",
+          "trees.json", "buildings.json"]
+
+
+def moved(state, lat, lon, d):
+    """Whether what's downloaded here was for somewhere else, as when a wrong course location is corrected."""
+    where = state.get("where")
+    if where:
+        dy = (where[0] - lat) * 111320
+        dx = (where[1] - lon) * 111320 * math.cos(math.radians(lat))
+        return math.hypot(dx, dy) > 300
+    # downloaded before locations were recorded: only a map with no golf on it suggests the wrong place
+    return bool(state.get("map")) and golf_features(d / "osm_golf.json") == 0
 
 
 def main():
@@ -155,6 +181,16 @@ def main():
     d.mkdir(parents=True, exist_ok=True)
     state_file = d / "source.json"
     state = json.loads(state_file.read_text(encoding="utf-8")) if state_file.exists() else {}
+    if state and moved(state, a.lat, a.lon, d):
+        if state.get("where"):
+            print(f"the course's location is now {a.lat:.5f}, {a.lon:.5f}, so its map and terrain are downloaded again", flush=True)
+        else:
+            print("the map downloaded earlier has no golf on it, so in case the course's location has been corrected, "
+                  "its map and terrain are downloaded again", flush=True)
+        for f in CACHED + [p.name for p in d.glob("lidar-*.tif")]:
+            (d / f).unlink(missing_ok=True)
+        state = {}
+    state["where"] = [a.lat, a.lon]
 
     def save():
         tmp = d / "source.json.tmp"
@@ -169,6 +205,9 @@ def main():
             state["map"] = True
             save()
     have_map = bool(state.get("map"))
+    if have_map:
+        state["golf"] = golf_features(osm[0])
+        save()
 
     dem, align = d / "elevation.tif", d / "align.json"
     tiles_file = d / "tiles.tif"                   # downloaded ahead, not yet checked
@@ -206,7 +245,10 @@ def main():
         args = [a.round, a.gkd, align, dem]
         if rigid:
             args += ["--rigid"] + ([f"--osm={p}" for p in osm] if have_map else [])
-        return run("align_lidar.py", *args) and alignment_holds(align)
+        if not run("align_lidar.py", *args):
+            state["alignment"] = "failed: align_lidar.py stopped with an error"
+            return False
+        return alignment_holds(align, state)
 
     if state.get("elevation") and not state.get("aligned"):
         # the elevation is here but no alignment has held up yet: this round may have more to go on
@@ -217,6 +259,7 @@ def main():
     if not state.get("elevation"):
         surveys = find_surveys()
         print(f"lidar surveys here: {len(surveys)}", flush=True)
+        state["surveys"] = len(surveys)
         for url in surveys[:MAX_SURVEYS]:
             dem.unlink(missing_ok=True)
             if lidar_file(url).exists():
@@ -238,9 +281,12 @@ def main():
                     print("downloading worldwide terrain tiles", flush=True)
                     tiles_dem(a.lat, a.lon, dem)
                 state.update(elevation="tiles", credit=TILES_CREDIT, aligned=try_alignment(True))
+                state.pop("elevation_problem", None)
                 save()
             except Exception as e:
                 print(f"  terrain tiles failed: {e}", flush=True)
+                state["elevation_problem"] = f"terrain tiles failed: {e}"[:300]
+                save()
 
     lidar = state.get("elevation") == "lidar"
     if state.get("aligned") and (not state.get("trees") or (lidar and have_map and not state.get("buildings"))):
@@ -254,6 +300,8 @@ def main():
             state["trees"] = LIDAR_TREES_CREDIT if lidar else CANOPY_CREDIT
             state["buildings"] = lidar and have_map
             save()
+        else:
+            print("  no trees this time; they're tried again next round", flush=True)
     save()
 
 
