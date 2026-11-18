@@ -17,7 +17,7 @@ $UvVersion = "0.13.1"
 $UvSha256 = "3b2661a463a5baea7f5076ea2b25ab71d77f36a6c0d809e5350651792f80a672"
 $PythonVersion = "3.12"
 $AppFiles = @("retrace.py", "make_index.py", "make_viewer.py", "build_round.py", "course_data.py", "align_lidar.py",
-              "fetch_osm.py", "lidar_trees.py", "osm_surfaces.py", "viewer.template.html", "requirements.lock",
+              "fetch_osm.py", "find_course.py", "lidar_trees.py", "osm_surfaces.py", "viewer.template.html", "requirements.lock",
               "README.md", "install.ps1", "Uninstall.bat")
 
 $Source = $PSScriptRoot

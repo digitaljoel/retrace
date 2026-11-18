@@ -166,6 +166,132 @@ def rigid_fit(rows, gkd, P, kinds, G, E0, N0, re, rn, crs, osm, OUT):
     print("wrote", OUT)
 
 
+def hole_pairs(gkd, feats):
+    """Each course's (GSPro green centres, mapped green ends) for the holes numbered on the map, for every
+    mapped course: a resort can have several courses numbered 1 to 18. feats are in map-grid metres."""
+    import shapely
+    greens = shapely.union_all([g for t, g in feats if t.get("golf") == "green" and g.geom_type in ("Polygon", "MultiPolygon")] or [shapely.Point()])
+    mine = {}
+    for i, h in enumerate(gkd["Holes"]):
+        pins = [(p["Position"]["x"], p["Position"]["z"]) for p in h.get("Pins") or [] if p.get("Position")]
+        if pins:
+            mine[i + 1] = np.mean(pins, 0)
+    courses = [g for t, g in feats if t.get("leisure") == "golf_course" and g.geom_type in ("Polygon", "MultiPolygon")]
+    groups = {}
+    for t, g in feats:
+        if t.get("golf") != "hole" or g.geom_type != "LineString" or not str(t.get("ref", "")).isdigit():
+            continue
+        ends = [np.array(g.coords[0]), np.array(g.coords[-1])]
+        end = min(ends, key=lambda e: greens.distance(shapely.Point(e)) if not greens.is_empty else 0)
+        home = next((k for k, c in enumerate(courses) if c.buffer(30).contains(g.centroid)), -1)
+        groups.setdefault(home, {})[int(t["ref"])] = end
+    out = []
+    for holes in groups.values():
+        refs = sorted(set(holes) & set(mine))
+        if len(refs) >= 4:
+            out.append((np.array([mine[r] for r in refs]), np.array([holes[r] for r in refs])))
+    return out
+
+
+def rotation_fit(A, B):
+    """Rotation and shift (no scale, no mirror) taking points A onto B, dropping the worst-matched pairs once.
+    Returns (theta, A centre, B centre, median error) or None."""
+    keep = np.ones(len(A), bool)
+    for _ in range(2):
+        a, b = A[keep], B[keep]
+        ma, mb = a.mean(0), b.mean(0)
+        U, _, Vt = np.linalg.svd((a - ma).T @ (b - mb))
+        R = (U @ Vt).T
+        if np.linalg.det(R) < 0:
+            return None
+        err = np.hypot(*((A - ma) @ R.T + mb - B).T)
+        keep = err <= max(3 * np.median(err[keep]), 10)
+    return float(np.arctan2(R[1, 0], R[0, 0])), ma, mb, float(np.median(err[keep]))
+
+
+def rotation_scan(checks, res=3.0, angles=np.arange(-30, 30.1, 1.0)):
+    """Rotation and shift that best put the ball lies and pins on their mapped surfaces (map-grid metres), by
+    FFT correlation at each angle. Returns (theta, points centre, map centre)."""
+    from rasterio.features import rasterize
+    from rasterio.transform import from_origin
+    checks = [(p, g, w) for p, g, w in checks if len(p) and not g.is_empty]
+    allp = np.vstack([p for p, _, _ in checks])
+    c = allp.mean(0)
+    k = int(np.ceil(2 * np.max(np.hypot(*(allp - c).T)) / res)) + 3
+    e0, n0, e1, n1 = shapely_bounds([g for _, g, _ in checks])
+    e0, n0 = e0 - k * res / 2, n0 - k * res / 2
+    nx, ny = int((e1 - e0) / res) + k // 2 + 1, int((n1 - n0) / res) + k // 2 + 1
+    shape = (ny + k, nx + k)
+    tr = from_origin(e0, n0 + ny * res, res, res)
+    FM = [np.fft.rfft2(rasterize([g.buffer(1.5)], out_shape=(ny, nx), transform=tr).astype(float)[::-1], shape) for _, g, _ in checks]
+
+    def score(deg):
+        th = np.radians(deg); R = np.array([[np.cos(th), -np.sin(th)], [np.sin(th), np.cos(th)]])
+        tot = 0
+        for (p, _, w), fm in zip(checks, FM):
+            q = np.round(((p - c) @ R.T) / res + k / 2).astype(int)
+            K = np.zeros((k, k)); np.add.at(K, (q[:, 1], q[:, 0]), w / len(p))
+            tot = tot + np.fft.irfft2(fm * np.conj(np.fft.rfft2(K, shape)), shape)
+        tot = tot[:ny, :nx]
+        j, i = np.unravel_index(np.argmax(tot), tot.shape)
+        return tot[j, i], th, np.array([e0 + (i + k / 2) * res, n0 + (j + k / 2) * res])
+    best = max((score(a) for a in angles), key=lambda s: s[0])
+    d = np.degrees(best[1])
+    best = max((score(a) for a in np.arange(d - 1, d + 1.01, 0.25)), key=lambda s: s[0])
+    return best[1], c, best[2]
+
+
+def shapely_bounds(geoms):
+    b = np.array([g.bounds for g in geoms])
+    return b[:, 0].min(), b[:, 1].min(), b[:, 2].max(), b[:, 3].max()
+
+
+def map_fit(rows, gkd, P, kinds, G, E0, N0, re, rn, crs, osm, OUT):
+    """Place the course from the map, for when the heights can't: a course on flat ground, or one built turned
+    from north. With numbered holes on the map, the greens are matched by number; otherwise the rotation and
+    position that put the most ball lies on their mapped surfaces win. The elevation then gives only the height."""
+    import shapely
+    import osm_surfaces as OSF
+    feats = OSF.load(osm)
+    grid = {"crs": crs, "orientation": {"swap": 0, "sx": 1, "sz": 1}, "tE": 0.0, "tN": 0.0, "cu": 0.0, "cv": 0.0, "theta": 0.0, "scale": 1.0}
+    F = OSF.to_gspro(feats, grid)   # in map-grid metres: x = east, z = north
+    fits = [f for f in (rotation_fit(a, b) for a, b in hole_pairs(gkd, F)) if f] if gkd else []
+    fits = [f for f in fits if f[3] <= 15]
+    if fits:
+        th, c, m, err = min(fits, key=lambda f: f[3])
+        print(f"placed from the map's numbered holes: turned {np.degrees(th):+.2f} deg, greens within {err:.1f} m")
+    else:
+        checks = OSF.course_checks(rows, gkd, OSF.layers(F))
+        if not any(len(p) for p, g, _ in checks.values() if not g.is_empty):
+            sys.exit("the map has none of the surfaces the balls finished on")
+        th, c, m = rotation_scan(list(checks.values()))
+        print(f"placed from the ball lies on the map: turned {np.degrees(th):+.2f} deg")
+    out = {"crs": crs, "orientation": {"swap": 0, "sx": 1, "sz": 1}, "tE": float(m[0]), "tN": float(m[1]), "cu": float(c[0]), "cv": float(c[1]),
+           "theta": th, "scale": 1.0, "hScale": 1.0, "hOffset": 0.0, "coarseSpread": 0.0, "coarseRunnerUp": 0.0,
+           "note": "E,N = (tE,tN) + R(theta)*((u,v)-(cu,cv)), with u = GSPro x and v = GSPro z; GSPro y = elevation + hOffset; placed from the map"}
+    L = OSF.layers(OSF.to_gspro(feats, out))
+    checks = OSF.course_checks(rows, gkd, L)
+    dx, dz = OSF.solve_shift(None, list(checks.values()), span=6)
+    out["cu"], out["cv"] = out["cu"] + dx, out["cv"] + dz   # move the course by (-dx, -dz) relative to the map
+    lies = checks["green lies"][0]
+    near = shapely.distance(OSF.layers(OSF.to_gspro(feats, out))["green"], shapely.points(lies)) if len(lies) else np.array([])
+    out["quality"] = {"greenLies": len(lies), "greenInside": float(np.mean(near <= 3.0)) if len(lies) else 0.0}
+    c_, s_ = np.cos(th), np.sin(th)
+    du, dv = P[:, 0] - out["cu"], P[:, 2] - out["cv"]
+    E, N = out["tE"] + c_ * du - s_ * dv, out["tN"] + s_ * du + c_ * dv
+    ground = map_coordinates(gaussian_filter(np.where(np.isnan(G), np.nanmean(G), G), 1.0 / re), [(N - N0) / rn, (E - E0) / re], order=1, mode="nearest")
+    inside = ~np.isnan(map_coordinates(G, [(N - N0) / rn, (E - E0) / re], order=0, mode="constant", cval=np.nan))
+    r = P[:, 1] - ground
+    out["hOffset"] = float(np.median(r[inside])) if inside.any() else 0.0
+    r = np.where(inside, r - out["hOffset"], np.nan)
+    out["coarseSpread"] = float(np.nanstd(r)) if inside.any() else 99.0
+    out["fit"] = {kd: {"n": int((kinds == kd).sum()), "median_abs_m": round(float(np.nanmedian(np.abs(r[kinds == kd]))), 3) if inside[kinds == kd].any() else 99.0,
+                       "p90_abs_m": round(float(np.nanpercentile(np.abs(r[kinds == kd]), 90)), 3) if inside[kinds == kd].any() else 99.0} for kd in np.unique(kinds)}
+    json.dump(out, open(OUT, "w"), indent=1)
+    print(f"{out['quality']}; balls within {out['fit'].get('ball', {}).get('median_abs_m')} m of the ground")
+    print("wrote", OUT)
+
+
 def main():
     args = sys.argv[1:]
     rigid = "--rigid" in args
@@ -177,6 +303,8 @@ def main():
     print(f"{len(P)} ground points: " + ", ".join(f"{k} {int((kinds == k).sum())}" for k in np.unique(kinds)))
     G, E0, N0, re, rn, crs = load_dem(DEMS)
     print(f"DEM {G.shape[1]} x {G.shape[0]} cells at {re:g} m ({crs}); {np.isnan(G).mean() * 100:.0f}% no data")
+    if "--map" in args:
+        return map_fit(rows, gkd, P, kinds, G, E0, N0, re, rn, crs, osm, OUT)
     if rigid:
         return rigid_fit(rows, gkd, P, kinds, G, E0, N0, re, rn, crs, osm, OUT)
 

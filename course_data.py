@@ -161,11 +161,45 @@ def moved(state, lat, lon, d):
     return bool(state.get("map")) and golf_features(d / "osm_golf.json") == 0
 
 
+FOUND = "found.json"   # where a lookup put a course that has no location; retrace.py reads it too
+LOOK_AGAIN_DAYS = 7      # a course that wasn't found is looked for again after this, in case someone maps it
+
+
+def find_location(d, name, town):
+    """A course's (lat, lon) from OpenStreetMap by name and town, kept in found.json; None if it isn't found."""
+    f = d / FOUND
+    try:
+        found = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        found = {}
+    if found.get("lat") is not None and found.get("query") == [name, town]:
+        return found["lat"], found["lon"]
+    if found.get("query") == [name, town] and time.time() - found.get("when", 0) < LOOK_AGAIN_DAYS * 86400:
+        print(f"{name} wasn't found on OpenStreetMap near {town} when it was last looked for, so there's no map or real terrain", flush=True)
+        return None
+    print(f"its course file has no location, so looking for \"{name}\" near \"{town}\" on OpenStreetMap", flush=True)
+    import find_course
+    try:
+        hit = find_course.find(name, town, say=lambda s: print(s, flush=True))
+    except Exception as e:   # no answer from the server: try again next time, rather than remembering "not found"
+        print(f"  couldn't look it up ({str(e)[:200]}); it's tried again with the next round", flush=True)
+        return None
+    found = {"query": [name, town], "when": time.time()}
+    if hit:
+        found.update(lat=hit[0], lon=hit[1], name=hit[2])
+        print(f"  found {hit[2]} at {hit[0]:.5f}, {hit[1]:.5f}", flush=True)
+    tmp = d / (FOUND + ".tmp")
+    tmp.write_text(json.dumps(found, indent=1), encoding="utf-8")
+    os.replace(tmp, f)
+    return (hit[0], hit[1]) if hit else None
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--folder", required=True, type=Path)
-    ap.add_argument("--lat", required=True, type=float)
-    ap.add_argument("--lon", required=True, type=float)
+    ap.add_argument("--lat", type=float)
+    ap.add_argument("--lon", type=float)
+    ap.add_argument("--find", nargs=2, metavar=("NAME", "TOWN"), help="no location: look the course up on OpenStreetMap by name and town")
     ap.add_argument("--round")
     ap.add_argument("--gkd", default="-")
     ap.add_argument("--no-lidar", action="store_true", help="use the worldwide sources even where lidar exists")
@@ -179,6 +213,13 @@ def main():
         background_mode()
     d = a.folder
     d.mkdir(parents=True, exist_ok=True)
+    if a.lat is None or a.lon is None:
+        if not a.find:
+            ap.error("give --lat and --lon, or --find")
+        where = find_location(d, *a.find)
+        if not where:
+            return
+        a.lat, a.lon = where
     state_file = d / "source.json"
     state = json.loads(state_file.read_text(encoding="utf-8")) if state_file.exists() else {}
     if state and moved(state, a.lat, a.lon, d):
@@ -241,14 +282,30 @@ def main():
         return
 
     def try_alignment(rigid):
+        if line_up(["--rigid"] + ([f"--osm={p}" for p in osm] if have_map else []) if rigid else []):
+            return True
+        # the heights alone couldn't place it (flat ground, or a course built turned from north): try the map
+        if have_map and state.get("golf"):
+            why = state.get("alignment")
+            print("placing the course from the map instead", flush=True)
+            if line_up(["--map"] + [f"--osm={p}" for p in osm]):
+                return True
+            state["alignment"] = f"{why}; from the map, {state.get('alignment')}"
+        return False
+
+    def line_up(extra):
         align.unlink(missing_ok=True)
-        args = [a.round, a.gkd, align, dem]
-        if rigid:
-            args += ["--rigid"] + ([f"--osm={p}" for p in osm] if have_map else [])
-        if not run("align_lidar.py", *args):
+        if not run("align_lidar.py", a.round, a.gkd, align, dem, *extra):
             state["alignment"] = "failed: align_lidar.py stopped with an error"
             return False
         return alignment_holds(align, state)
+
+    if state.get("elevation") == "tiles" and not state.get("aligned") and state.get("surveys") and have_map and state.get("golf")             and not state.get("lidar_from_map"):
+        # lidar here was turned down before the map could place a course; it gets one more try now that it can
+        print("trying the lidar again, now that the map can place the course", flush=True)
+        state["lidar_from_map"] = True
+        state.pop("elevation", None)
+        save()
 
     if state.get("elevation") and not state.get("aligned"):
         # the elevation is here but no alignment has held up yet: this round may have more to go on

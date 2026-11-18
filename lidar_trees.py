@@ -329,6 +329,7 @@ def main():
         keys, W = ept_nodes(a.ept, sbox, want)
         print(f"reading {len(keys)} point tiles down to depth {want}", flush=True)
         CHM = np.zeros((h, w), np.float32); dzs = []
+        ROOF = np.zeros((h, w), np.float32)   # buildings, for their heights; surveys that sort points give them class 6
         rng = np.random.default_rng(3)
 
         def consume(E, N, Z, C):
@@ -336,13 +337,14 @@ def main():
             if g.any():   # a sample of ground points, to check the two surveys' heights agree
                 pick = rng.choice(np.flatnonzero(g), min(400, int(g.sum())), replace=False)
                 dzs.append(np.c_[E[pick], N[pick], Z[pick] - ground_at(E[pick], N[pick])])
-            v = (C == 1) | (C == 0)
-            if not v.any():
-                return
-            Hc = Z[v] - top_at(E[v], N[v])
-            ok = (Hc > 0.5) & (Hc < 70)
-            ix = ((E[v][ok] - box[0]) / res).astype(int).clip(0, w - 1); iy = ((N[v][ok] - box[1]) / res).astype(int).clip(0, h - 1)
-            np.maximum.at(CHM, (iy, ix), Hc[ok].astype(np.float32))
+            # unclassified points, or ones a survey has already sorted into vegetation (3-5) or buildings (6)
+            for into, v in ((CHM, (C <= 1) | ((C >= 3) & (C <= 5))), (ROOF, (C <= 1) | (C == 6))):
+                if not v.any():
+                    continue
+                Hc = Z[v] - top_at(E[v], N[v])
+                ok = (Hc > 0.5) & (Hc < 70)
+                ix = ((E[v][ok] - box[0]) / res).astype(int).clip(0, w - 1); iy = ((N[v][ok] - box[1]) / res).astype(int).clip(0, h - 1)
+                np.maximum.at(into, (iy, ix), Hc[ok].astype(np.float32))
         t0 = time.time()
         n_pts = read_points(a.ept, keys, sbox, consume, to_grid)
         area = (box[2] - box[0]) * (box[3] - box[1])
@@ -357,10 +359,11 @@ def main():
               f"median gap {np.median(np.abs(resid)):.2f} m")
         xs = box[0] + (np.arange(w) + 0.5) * res - box[0]; ys = box[1] + (np.arange(h) + 0.5) * res - box[1]
         lift = coef[0] + coef[1] * xs[None, :] + coef[2] * ys[:, None]
-        CHM = np.where(CHM > 0, np.maximum(CHM - lift, 0), 0).astype(np.float64)
-        CHM = np.maximum(CHM, ndi.grey_closing(CHM, size=3) * (CHM == 0))      # fill single-cell gaps
+        settle = lambda A: (lambda B: np.maximum(B, ndi.grey_closing(B, size=3) * (B == 0)))(   # fill single-cell gaps
+            np.where(A > 0, np.maximum(A - lift, 0), 0).astype(np.float64))
+        CHM = settle(CHM)
         if a.buildings_out and a.osm:
-            roofs = roof_heights(a.osm, CHM, box, res, grid_crs)
+            roofs = roof_heights(a.osm, settle(ROOF), box, res, grid_crs)
             json.dump(roofs, open(a.buildings_out, "w"), separators=(",", ":"))
             print(f"measured {len(roofs)} buildings: median height {np.median([b['h'] for b in roofs.values()] or [0]):.1f} m", flush=True)
     if a.osm:

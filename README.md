@@ -255,8 +255,8 @@ so the page is built from shot data alone. Check `courses_dir`, then rebuild the
 
 **The page has no real terrain or map.** After each build, `retrace.log` says what the page got and, if
 something is missing, why: no public lidar there, a download that failed (tried again next round), terrain that
-didn't line up with your shots, or no golf course mapped at the course's location. That last one usually means the
-course file puts the course in the wrong place. Find the course on a map, give Retrace its real location (see
+didn't line up with your shots, a course file with no location that couldn't be looked up, or no golf course mapped at the course's location.
+Those last two usually mean Retrace doesn't know where the course is, or the course file puts it in the wrong place. Find the course on a map, give Retrace its real location (see
 **Real terrain, greens and trees** below), and rebuild with `retrace.py build <round number>`. Its map and terrain
 are downloaded again for the new location.
 
@@ -297,7 +297,15 @@ download fails, for example with no internet, that round's page gets whatever wo
 course tries again. Everything is kept in `C:\Users\<you>\Retrace\course-data`; delete a course's folder there to
 download it fresh.
 
-If a course file has no location, or the wrong one, you can give it one, using the course key `check` shows:
+Many course files have no location, only the course's name and town. For those, Retrace looks the course up on
+OpenStreetMap by name near that town, and the log says what it found. It finds most real courses; it can't find
+one that's mapped under a quite different name, or one that isn't mapped at all. A course that isn't found is
+looked for again after a week.
+
+GSPro courses are usually built facing north, but not always. A course that's turned, or on ground too flat to
+place it by its heights, is placed by matching its greens to the mapped greens instead.
+
+If a course still has no location, or the wrong one, you can give it one, using the course key `check` shows:
 
 ```powershell
 .venv\Scripts\python.exe retrace.py set location.Some_Course_GSP "40.1608,-111.5121"

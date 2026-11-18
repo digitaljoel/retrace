@@ -310,7 +310,8 @@ def gkd_file(cfg, course_key):
 
 
 def course_location(cfg, course_key):
-    """(lat, lon) from the settings or the course file. Fictional courses have none, or 0, 0."""
+    """(lat, lon) from the settings, the course file, or where OpenStreetMap was found to have the course.
+    Fictional courses have none, or 0, 0."""
     manual = cfg["locations"].get(course_key)
     if manual:
         lat, lon = str(manual).split(",")
@@ -319,12 +320,37 @@ def course_location(cfg, course_key):
     if gkd:
         try:
             g = json.loads(gkd.read_text(encoding="utf-8-sig"))
-            lat, lon = float(g["CourseLat"]), float(g["CourseLong"])
-        except (OSError, ValueError, KeyError, TypeError):
+            lat, lon = float(g.get("CourseLat") or 0), float(g.get("CourseLong") or 0)
+        except (OSError, ValueError, TypeError, AttributeError):
             return None
         if (lat or lon) and abs(lat) <= 90 and abs(lon) <= 180:
             return lat, lon
+        found = found_location(cfg, course_key)
+        if found.get("lat") is not None and found.get("query") == list(course_name_town(cfg, course_key) or []):
+            return found["lat"], found["lon"]
     return None
+
+
+def found_location(cfg, course_key):
+    """What course_data.py's OpenStreetMap lookup found for a course with no location ({} if it hasn't looked)."""
+    try:
+        return json.loads((course_data_dir(cfg, course_key) / "found.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def course_name_town(cfg, course_key):
+    """(name, town) from the course file, to look the course up by; None if it doesn't name both."""
+    gkd = gkd_file(cfg, course_key)
+    try:
+        g = json.loads(gkd.read_text(encoding="utf-8-sig")) if gkd else {}
+    except (OSError, ValueError):
+        return None
+    name = str(g.get("CourseName") or "").strip()
+    town = str(g.get("Location") or "").strip(" ,") or ", ".join(str(g.get(k)).strip() for k in ("CityTown", "StateCountyProvince", "Country") if g.get(k))
+    if not name or not town or "fictional" in town.lower():
+        return None
+    return name, town
 
 
 def course_data_dir(cfg, course_key):
@@ -333,18 +359,25 @@ def course_data_dir(cfg, course_key):
 
 def prepare_course(cfg, source, course_key):
     """Download whatever this course's real terrain still needs. A failure only means a plainer page."""
-    where = course_location(cfg, course_key)
+    where, lookup = course_location(cfg, course_key), None
     if not where:
-        if gkd_file(cfg, course_key):
-            log.info("%s: no location in its course file, so no real terrain", course_key)
-        else:
+        if not gkd_file(cfg, course_key):
             log.warning("%s: no course file in %s, so no location and no real terrain", course_key, courses_dir(cfg) / str(course_key))
-        return
+            return
+        lookup = course_name_town(cfg, course_key)
+        if not lookup:
+            log.info("%s: no location in its course file, and no real place named in it to look up, so no real terrain "
+                     "(a fictional course or a range has none)", course_key)
+            return
     wait_for_early_download(course_key)    # both would be downloading the same files
     gkd = gkd_file(cfg, course_key)
-    args = [script_python(), str(HERE / "course_data.py"), "--folder", str(course_data_dir(cfg, course_key)), "--lat", str(where[0]), "--lon", str(where[1]),
+    place = ["--lat", str(where[0]), "--lon", str(where[1])] if where else ["--find", *lookup]
+    args = [script_python(), str(HERE / "course_data.py"), "--folder", str(course_data_dir(cfg, course_key)), *place,
             "--round", str(source), "--gkd", str(gkd) if gkd else "-"]
-    log.info("%s: getting course data for %.5f, %.5f", course_key, *where)
+    if where:
+        log.info("%s: getting course data for %.5f, %.5f", course_key, *where)
+    else:
+        log.info("%s: no location in its course file, so looking it up on OpenStreetMap", course_key)
     try:
         done = run_quietly(args, timeout=3600)
     except subprocess.TimeoutExpired:
@@ -354,6 +387,15 @@ def prepare_course(cfg, source, course_key):
             log.info("%s", done.stdout.strip())
         if done.returncode:
             log.error("%s: course data failed\n%s", course_key, "\n".join(done.stderr.strip().splitlines()[-12:]))
+    if not where:
+        where = course_location(cfg, course_key)
+        if not where:
+            if found_location(cfg, course_key).get("query"):   # it looked and found nothing (not just no answer)
+                log.warning("%s: its course file has no location, and OpenStreetMap has no golf course called \"%s\" near %s, "
+                            "so the page has no map or real terrain. If it's a real course, find it on a map and put its latitude and "
+                            "longitude under \"locations\" in %s (see Settings in the README), then rebuild the round with: "
+                            "retrace.py build <round number>", course_key, lookup[0], lookup[1], CONFIG)
+            return
     report_course(cfg, course_key, where)
 
 
@@ -364,8 +406,8 @@ def report_course(cfg, course_key, where):
         log.warning("%s: couldn't download the OpenStreetMap data, so the page has no map of the course; "
                     "it's tried again with the next round here", k)
     elif s.get("golf") == 0:
-        log.warning("%s: OpenStreetMap has no golf course mapped within about 2.5 km of %.5f, %.5f, the location in its "
-                    "course file. Either nobody has mapped the course, or that location is wrong. If it's wrong, find the "
+        log.warning("%s: OpenStreetMap has no golf course mapped within about 2.5 km of %.5f, %.5f, the location "
+                    "Retrace has for it. Either nobody has mapped the course, or that location is wrong. If it's wrong, find the "
                     "course on a map and put its latitude and longitude under \"locations\" in %s (see Settings in the "
                     "README), then rebuild the round with: retrace.py build <round number>", k, where[0], where[1], CONFIG)
     if s.get("elevation") == "lidar":
@@ -392,11 +434,13 @@ def start_early_download(cfg, course_key):
         return
     EARLY[course_key] = None
     where, state = course_location(cfg, course_key), course_sources(cfg, course_key)
-    if not where or (state.get("map") and state.get("elevation")):
+    lookup = None if where else course_name_town(cfg, course_key)
+    if not (where or lookup) or (state.get("map") and state.get("elevation")):
         return  # nothing to download, or it was all downloaded before
     d = course_data_dir(cfg, course_key)
     d.mkdir(parents=True, exist_ok=True)
-    args = [script_python(), str(HERE / "course_data.py"), "--folder", str(d), "--lat", str(where[0]), "--lon", str(where[1]), "--download-only"]
+    place = ["--lat", str(where[0]), "--lon", str(where[1])] if where else ["--find", *lookup]
+    args = [script_python(), str(HERE / "course_data.py"), "--folder", str(d), *place, "--download-only"]
     flags = subprocess.IDLE_PRIORITY_CLASS | subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     with open(d / "early-download.log", "w", encoding="utf-8") as out:
         EARLY[course_key] = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, cwd=str(HERE), creationflags=flags,
