@@ -25,8 +25,10 @@ yet, so Windows doesn't recognize it. You can read `install.ps1` first to see ex
 **Then play a round.** Retrace runs in the background and starts whenever you sign in. Shortly after you hole out
 on the 18th, double-click **Retrace Rounds** on your desktop to see your rounds in your browser.
 
-To update, open a Command Prompt and run the two lines below, or download the new zip and run **Install.bat**
-again. Either way your rounds and settings stay.
+Retrace updates itself. Each time the watcher starts, usually when you sign in to Windows, it checks GitHub for a
+newer version, installs it in the background and restarts; `update.log` in `C:\Users\<you>\Retrace` says how it
+went. To turn that off, set `auto_update` to `false` (see Settings). To update right away, open a Command Prompt
+and run the two lines below, or download the new zip and run **Install.bat** again. Your rounds and settings stay.
 
 ```
 cd %LOCALAPPDATA%\Programs\Retrace
@@ -83,6 +85,7 @@ Only the settings you change need to be in it, for example:
 | `idle_minutes` | How long a round of fewer holes must be left before it's built | `30` |
 | `min_holes` | The fewest holes that get a page | `9` |
 | `download_early` | Download a new course's map and elevation while its round is played | `true` |
+| `auto_update` | When the watcher starts, install a newer Retrace from GitHub if there is one | `true` |
 | `locations` | Latitude and longitude for courses whose course file has none or the wrong one, by course key | none |
 
 It's JSON, so text goes in double quotes, and on/off settings are `true` or `false`. In folder paths, use forward

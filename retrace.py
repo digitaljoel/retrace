@@ -38,6 +38,7 @@ DEFAULTS = {
     "min_holes": 9,
     "download_early": True, # get a course's map and elevation while its round is played, at the lowest priority
     "locations": {},        # course key -> "lat,lon", for a course whose file doesn't say where it is
+    "auto_update": True,    # install a newer Retrace from GitHub when the watcher starts
 }
 POLL_SECONDS = 5
 EARLY = {}  # course key -> the early download started for it in this watcher (see start_early_download)
@@ -756,6 +757,9 @@ def cmd_watch(cfg, a):
             save_setting("courses_dir", found.as_posix())
             cfg["courses_dir"] = found.as_posix()
             log.info("found GSPro's courses in %s", found)
+    if update_on_start(cfg):
+        lock.close()   # the installer starts the new watcher
+        return 0
     log.info("watching %s", round_file(cfg))
     watcher = Watcher(cfg)
     while True:
@@ -982,36 +986,105 @@ def cmd_stop(cfg, a):
 
 
 GITHUB_REPO = "digitaljoel/retrace"
+UPDATE_BRANCH = os.environ.get("RETRACE_UPDATE_BRANCH") or "main"   # another branch, only for trying out updates
+VERSION_FILE = HERE / "version.json"   # which GitHub commit is installed; written by updates
+
+
+def installed_version():
+    try:
+        return json.loads(VERSION_FILE.read_text(encoding="utf-8")).get("sha")
+    except (OSError, ValueError):
+        return None
+
+
+def newest_version():
+    """(sha, one-line description) of the newest Retrace on GitHub. Raises RuntimeError."""
+    import urllib.request
+    reply = json.loads(http(urllib.request.Request(f"https://api.github.com/repos/{GITHUB_REPO}/commits/{UPDATE_BRANCH}",
+                                                   headers={"Accept": "application/vnd.github+json", "User-Agent": "retrace"}),
+                            "ask GitHub for the newest Retrace", timeout=30))
+    try:
+        info = reply["commit"]
+        return reply["sha"], f"{reply['sha'][:7]}, {info['committer']['date'][:10]}: {info['message'].splitlines()[0]}"
+    except (KeyError, TypeError, IndexError):
+        raise RuntimeError("GitHub's answer about the newest Retrace didn't make sense")
+
+
+def download_version(sha):
+    """Unzip that commit of Retrace into a new temporary folder; returns the folder holding Install.bat."""
+    import io, tempfile, urllib.request, zipfile
+    data = http(urllib.request.Request(f"https://github.com/{GITHUB_REPO}/archive/{sha}.zip", headers={"User-Agent": "retrace"}),
+                "download Retrace from GitHub", timeout=300)
+    folder = Path(tempfile.mkdtemp(prefix="retrace-update-"))
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            z.extractall(folder)
+    except zipfile.BadZipFile:
+        raise RuntimeError("the download from GitHub wasn't a zip file")
+    bat = next(folder.glob("*/Install.bat"), None)
+    if not bat or not (bat.parent / "install.ps1").exists():
+        raise RuntimeError(f"the download from GitHub has no Install.bat in it; it's in {folder}")
+    # the installer copies this along with Retrace, so the next check knows what's installed
+    (bat.parent / VERSION_FILE.name).write_text(json.dumps({"sha": sha}), encoding="utf-8")
+    return bat.parent
 
 
 def cmd_update(cfg, a):
     """Download the newest Retrace from GitHub and run its installer, which restarts the watcher with it."""
-    import io, tempfile, urllib.request, zipfile
     if os.name != "nt":
         print("update installs with Install.bat, so it only works on Windows")
         return 1
     try:
-        latest = json.loads(http(urllib.request.Request(f"https://api.github.com/repos/{GITHUB_REPO}/commits/main",
-                                                        headers={"Accept": "application/vnd.github+json", "User-Agent": "retrace"}),
-                                 "ask GitHub for the newest Retrace", timeout=60))
-        sha, info = latest["sha"], latest["commit"]
-        print(f"newest Retrace: {sha[:7]}, {info['committer']['date'][:10]}: {info['message'].splitlines()[0]}")
-        data = http(urllib.request.Request(f"https://github.com/{GITHUB_REPO}/archive/{sha}.zip", headers={"User-Agent": "retrace"}),
-                    "download it from GitHub", timeout=300)
-    except (RuntimeError, KeyError, ValueError) as e:
+        sha, about = newest_version()
+        print("newest Retrace:", about)
+        if sha == installed_version():
+            print("that's the one installed; installing it again anyway")
+        folder = download_version(sha)
+    except RuntimeError as e:
         print(e)
         return 1
-    folder = Path(tempfile.mkdtemp(prefix="retrace-update-"))
-    with zipfile.ZipFile(io.BytesIO(data)) as z:
-        z.extractall(folder)
-    bat = next(folder.glob("*/Install.bat"), None)
-    if not bat or not (bat.parent / "install.ps1").exists():
-        print(f"the download from GitHub has no Install.bat in it; it's in {folder}")
-        return 1
     # its own window, so this process (and the Python it runs on) is out of the way while the installer works
-    subprocess.Popen(["cmd.exe", "/c", "start", "Retrace update", str(bat), "-InstallDir", str(HERE), "-NoOpen"], cwd=str(bat.parent))
+    subprocess.Popen(["cmd.exe", "/c", "start", "Retrace update", str(folder / "Install.bat"), "-InstallDir", str(HERE), "-NoOpen"], cwd=str(folder))
     print("the installer is running in a new window; it stops and restarts the watcher, and says when it's done")
     return 0
+
+
+UPDATE_RETRY_HOURS = 24   # an update that didn't take isn't tried again for this long, so a failing one can't loop
+
+
+def update_on_start(cfg):
+    """When the watcher starts: if GitHub has a newer Retrace, install it with no window, in the background. The
+    installer stops this watcher and starts the new one (or this one again, if the install fails). Returns True
+    if an update was started, so the watcher should stop now."""
+    if not cfg["auto_update"] or os.name != "nt" or (HERE / ".git").exists():   # a git checkout updates with git
+        return False
+    try:
+        sha, about = newest_version()
+    except RuntimeError as e:
+        log.info("couldn't check for a newer Retrace (%s); carrying on with this one", e)
+        return False
+    if sha == installed_version():
+        return False
+    state = load_state(cfg)
+    tried = state.get("update_tried") or {}
+    if tried.get("sha") == sha and time.time() - tried.get("time", 0) < UPDATE_RETRY_HOURS * 3600:
+        log.info("Retrace %s is out, but installing it didn't work earlier (see %s); it's tried again within a day",
+                 sha[:7], output_dir(cfg) / "update.log")
+        return False
+    state["update_tried"] = {"sha": sha, "time": time.time()}
+    save_state(cfg, state)
+    try:
+        folder = download_version(sha)
+    except RuntimeError as e:
+        log.warning("couldn't download the newer Retrace (%s); carrying on with this one", e)
+        return False
+    log.info("installing a newer Retrace, %s; the watcher restarts when it's done (details in %s)", about, output_dir(cfg) / "update.log")
+    out = open(output_dir(cfg) / "update.log", "w", encoding="utf-8")
+    flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.IDLE_PRIORITY_CLASS
+    subprocess.Popen(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(folder / "install.ps1"),
+                      "-InstallDir", str(HERE), "-NoOpen"], cwd=str(folder), stdin=subprocess.DEVNULL, stdout=out,
+                     stderr=subprocess.STDOUT, creationflags=flags)
+    return True
 
 
 def cmd_check(cfg, a):

@@ -68,10 +68,14 @@ try {
     Write-Host ""
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
     Stop-Watcher
+    $WatcherStopped = $true
 
     Step "Copying Retrace..."
     if ($Source -ne (Resolve-Path $InstallDir).Path) {
         foreach ($f in $AppFiles) { Copy-Item -LiteralPath (Join-Path $Source $f) -Destination $InstallDir -Force }
+        # which GitHub commit this is, when retrace.py update downloaded it; a zip from the web page has none
+        $Version = Join-Path $Source "version.json"
+        if (Test-Path $Version) { Copy-Item -LiteralPath $Version -Destination $InstallDir -Force }
     }
 
     $Tools = Join-Path $InstallDir "tools"
@@ -129,6 +133,7 @@ try {
     Run $Python @($Retrace, "startup", "on") "set Retrace to start at sign-in"
     Run $Python @($Retrace, "index") "create your rounds page"
     Start-Process -FilePath $PythonW -ArgumentList "`"$Retrace`" watch" -WorkingDirectory $InstallDir
+    $WatcherStopped = $false
 
     Step "Adding the Retrace Rounds shortcut to your desktop..."
     $shell = New-Object -ComObject WScript.Shell
@@ -154,5 +159,10 @@ catch {
     Write-Host ""
     Write-Host "Setup didn't finish: $($_.Exception.Message)" -ForegroundColor Red
     if (-not $SettingsProblem) { Write-Host "Check your internet connection and run Install.bat again. It's safe to run more than once." }
+    # don't leave Retrace stopped: start the watcher again with whatever is installed
+    if ($WatcherStopped -and (Test-Path $PythonW) -and (Test-Path $Retrace)) {
+        Start-Process -FilePath $PythonW -ArgumentList "`"$Retrace`" watch" -WorkingDirectory $InstallDir
+        Write-Host "Retrace is running again with the files it has."
+    }
     exit 1
 }
