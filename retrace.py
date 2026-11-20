@@ -981,6 +981,39 @@ def cmd_stop(cfg, a):
     return done.returncode
 
 
+GITHUB_REPO = "digitaljoel/retrace"
+
+
+def cmd_update(cfg, a):
+    """Download the newest Retrace from GitHub and run its installer, which restarts the watcher with it."""
+    import io, tempfile, urllib.request, zipfile
+    if os.name != "nt":
+        print("update installs with Install.bat, so it only works on Windows")
+        return 1
+    try:
+        latest = json.loads(http(urllib.request.Request(f"https://api.github.com/repos/{GITHUB_REPO}/commits/main",
+                                                        headers={"Accept": "application/vnd.github+json", "User-Agent": "retrace"}),
+                                 "ask GitHub for the newest Retrace", timeout=60))
+        sha, info = latest["sha"], latest["commit"]
+        print(f"newest Retrace: {sha[:7]}, {info['committer']['date'][:10]}: {info['message'].splitlines()[0]}")
+        data = http(urllib.request.Request(f"https://github.com/{GITHUB_REPO}/archive/{sha}.zip", headers={"User-Agent": "retrace"}),
+                    "download it from GitHub", timeout=300)
+    except (RuntimeError, KeyError, ValueError) as e:
+        print(e)
+        return 1
+    folder = Path(tempfile.mkdtemp(prefix="retrace-update-"))
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        z.extractall(folder)
+    bat = next(folder.glob("*/Install.bat"), None)
+    if not bat or not (bat.parent / "install.ps1").exists():
+        print(f"the download from GitHub has no Install.bat in it; it's in {folder}")
+        return 1
+    # its own window, so this process (and the Python it runs on) is out of the way while the installer works
+    subprocess.Popen(["cmd.exe", "/c", "start", "Retrace update", str(bat), "-InstallDir", str(HERE), "-NoOpen"], cwd=str(bat.parent))
+    print("the installer is running in a new window; it stops and restarts the watcher, and says when it's done")
+    return 0
+
+
 def cmd_check(cfg, a):
     problems = 0
 
@@ -1066,7 +1099,10 @@ def main():
     p.add_argument("state", choices=("on", "off"))
     p.set_defaults(fn=cmd_startup)
     sub.add_parser("stop").set_defaults(fn=cmd_stop)
+    sub.add_parser("update").set_defaults(fn=cmd_update)
     a = ap.parse_args()
+    if a.fn is cmd_update:   # needs no settings, so it still works when they're what's broken
+        sys.exit(cmd_update(None, a))
     try:
         cfg = load_config()
     except ConfigError as e:

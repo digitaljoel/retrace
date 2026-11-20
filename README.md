@@ -25,7 +25,15 @@ yet, so Windows doesn't recognize it. You can read `install.ps1` first to see ex
 **Then play a round.** Retrace runs in the background and starts whenever you sign in. Shortly after you hole out
 on the 18th, double-click **Retrace Rounds** on your desktop to see your rounds in your browser.
 
-To update, download the new zip and run **Install.bat** again; your rounds and settings stay. To remove Retrace, run
+To update, open a Command Prompt and run the two lines below, or download the new zip and run **Install.bat**
+again. Either way your rounds and settings stay.
+
+```
+cd %LOCALAPPDATA%\Programs\Retrace
+.venv\Scripts\python.exe retrace.py update
+```
+
+To remove Retrace, run
 **Uninstall.bat** in `%LOCALAPPDATA%\Programs\Retrace`. That removes the whole folder, including your settings and
 any cloud key in it. Your rounds stay in `C:\Users\<you>\Retrace` until you delete them.
 
@@ -225,6 +233,7 @@ To restart the watcher: `.venv\Scripts\python.exe retrace.py stop`, then `.venv\
 | `retrace.py watch` | Runs the watcher in this window, showing what it's doing (Ctrl+C to stop) |
 | `retrace.py open` | Shows your rounds in your browser |
 | `retrace.py stop` | Stops the background watcher |
+| `retrace.py update` | Downloads the newest Retrace from GitHub and installs it, keeping your rounds and settings |
 | `retrace.py startup on` / `off` | Starts the watcher when you sign in, or doesn't |
 | `retrace.py build [ROUND] [--date YYYY-MM-DD]` | Builds one round now, finished or not: a saved round's number or file (default: the current round) |
 | `retrace.py index` | Rebuilds the rounds list from the pages in the folder |
